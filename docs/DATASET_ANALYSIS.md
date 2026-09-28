@@ -17,7 +17,7 @@ python scripts/analyze_dataset.py --simulate --profile nasa --start "1995-07-24 
 
 | | |
 |---|---|
-| Source | NASA Kennedy Space Center WWW server, July 1995 (Internet Traffic Archive `NASA_access_log_Jul95`). Saved locally as `access_log_Jul95` — both names are accepted |
+| Source | NASA Kennedy Space Center WWW server, July 1995 (Internet Traffic Archive `NASA_access_log_Jul95`). Shipped in the repo as `data/datasets/NASA_access_log_Jul95.gz` (19.5 MB, lossless) and unpacked on first use; a raw `access_log_Jul95` / `NASA_access_log_Jul95` is accepted too |
 | Size / lines | 205 MB, 1,891,715 lines, 1 Jul 00:00:01 → 28 Jul 13:32:25 (27.6 days), all in zone `-0400` |
 | Average rate | 0.79 requests/s (per minute: p50 41, p90 91, p99 145, max 405; 162 zero-request minutes) |
 | Status codes | 200: 1,701,534 · 304: 132,627 · 302: 46,573 · **404: 10,845** · 403: 54 · 400: 5 · **500: 62** · 501: 14 |

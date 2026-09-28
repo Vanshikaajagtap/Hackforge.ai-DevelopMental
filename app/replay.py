@@ -13,11 +13,13 @@ Pieces (all pure / injectable so they are testable without a 200 MB file or real
 from __future__ import annotations
 
 import asyncio
+import gzip
 import json
 import logging
 import os
 import random
 import re
+import shutil
 import time
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
@@ -41,16 +43,37 @@ _FALLBACK_NAMES = ("access_log_Jul95", "NASA_access_log_Jul95")
 # =================================================================================================
 # Dataset access
 # =================================================================================================
+def _unpack(gz: Path, target: Path) -> Path:
+    """Decompress `gz` into `target`, atomically: a crash or a second process unpacking at the same moment
+    can never leave (or expose) a half-written dataset, because the rename happens only after the last byte."""
+    log.info("unpacking %s -> %s (one time, ~200 MB)", gz.name, target)
+    tmp = target.with_name(f"{target.name}.{os.getpid()}.part")
+    try:
+        with gzip.open(gz, "rb") as fin, open(tmp, "wb") as fout:
+            shutil.copyfileobj(fin, fout, 1 << 20)
+        os.replace(tmp, target)
+    except (OSError, EOFError) as e:                 # BadGzipFile / truncated archive / disk full / read-only folder
+        tmp.unlink(missing_ok=True)
+        raise FileNotFoundError(f"dataset archive {gz} could not be unpacked to {target}: {e}") from e
+    return target
+
+
 def resolve_dataset_path(path: str | os.PathLike) -> Path:
-    """The configured path, or - since the file is often saved as `access_log_Jul95` - a known alternative name next to it."""
+    """Find the raw dataset, in this order: the configured path; the same file under its other common name
+    (`access_log_Jul95`); a gzipped copy of either (the repo ships `NASA_access_log_Jul95.gz`), which is unpacked
+    once next to itself. The unpacked ~205 MB file is git-ignored."""
     p = Path(path)
     if p.is_file():
         return p
     for name in _FALLBACK_NAMES:
         if (p.parent / name).is_file():
             return p.parent / name
+    for name in (p.name, *_FALLBACK_NAMES):
+        gz = p.parent / f"{name}.gz"
+        if gz.is_file():
+            return _unpack(gz, p.parent / name)
     raise FileNotFoundError(
-        f"dataset not found: {p} (also tried {', '.join(_FALLBACK_NAMES)} in {p.parent}). "
+        f"dataset not found: {p} (also tried {', '.join(_FALLBACK_NAMES)}, and their .gz, in {p.parent}). "
         "Download the NASA HTTP Jul-95 log and place it in data/datasets/ - see the README.")
 
 

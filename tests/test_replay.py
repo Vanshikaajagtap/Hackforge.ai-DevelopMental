@@ -3,6 +3,7 @@ Uses synthetic files and the small real fixtures - never the 200 MB dataset, nev
 import asyncio
 import json
 import time
+from pathlib import Path
 from dataclasses import replace
 
 import pytest
@@ -581,3 +582,73 @@ def test_a_crashing_replay_is_reported_and_releases_the_guard_and_generator(repl
         assert "disk full" in st["error"] and st["guard"]["active"] is False       # AWS suppression must not stick
         assert c.app.state.rt.scenario.paused is False                              # nor the paused generator
         assert c.get("/health").json() == {"status": "ok"}                          # the app itself is unaffected
+
+
+# ---- the dataset ships as a .gz and is unpacked on first use -----------------------------------------------
+def gz_bytes(data: bytes) -> bytes:
+    import gzip
+    return gzip.compress(data)
+
+
+def test_a_gzipped_dataset_is_unpacked_once_next_to_itself(tmp_path):
+    raw = b"first line\nsecond \x0c line with a form feed\n"
+    (tmp_path / "NASA_access_log_Jul95.gz").write_bytes(gz_bytes(raw))
+    target = tmp_path / "NASA_access_log_Jul95"
+    assert resolve_dataset_path(target) == target and target.read_bytes() == raw          # byte-exact
+    assert not list(tmp_path.glob("*.part"))                                             # atomic: no temp file left behind
+    stamp = target.stat().st_mtime_ns
+    assert resolve_dataset_path(target) == target and target.stat().st_mtime_ns == stamp   # the second call does not unpack again
+
+
+def test_the_raw_file_always_wins_and_is_never_overwritten_by_the_archive(tmp_path):
+    (tmp_path / "NASA_access_log_Jul95").write_bytes(b"raw wins\n")
+    (tmp_path / "NASA_access_log_Jul95.gz").write_bytes(gz_bytes(b"from the archive\n"))
+    assert resolve_dataset_path(tmp_path / "NASA_access_log_Jul95").read_bytes() == b"raw wins\n"
+
+
+def test_the_archive_of_the_alternative_name_unpacks_to_that_name(tmp_path):
+    (tmp_path / "access_log_Jul95.gz").write_bytes(gz_bytes(b"x\n"))
+    got = resolve_dataset_path(tmp_path / "NASA_access_log_Jul95")
+    assert got.name == "access_log_Jul95" and got.read_bytes() == b"x\n"
+
+
+@pytest.mark.parametrize("payload", [b"this is not gzip at all", gz_bytes(b"some data " * 1000)[:40]])   # garbage, truncated
+def test_a_broken_archive_is_a_clear_error_and_leaves_nothing_behind(tmp_path, payload):
+    (tmp_path / "NASA_access_log_Jul95.gz").write_bytes(payload)
+    with pytest.raises(FileNotFoundError, match="could not be unpacked"):
+        resolve_dataset_path(tmp_path / "NASA_access_log_Jul95")
+    assert not (tmp_path / "NASA_access_log_Jul95").exists() and not list(tmp_path.glob("*.part"))
+
+
+def test_an_unpacked_archive_replays_like_the_original(tmp_path):
+    src = FIXTURES / "nasa_sample.log"
+    (tmp_path / "NASA_access_log_Jul95.gz").write_bytes(gz_bytes(src.read_bytes()))
+    got = resolve_dataset_path(tmp_path / "NASA_access_log_Jul95")
+    assert got.read_bytes() == src.read_bytes() and dataset_bounds(got) == dataset_bounds(src)
+
+
+def test_the_replay_api_starts_from_a_gz_only_dataset(replay_client, tmp_path):
+    folder = tmp_path / "shipped"
+    folder.mkdir()
+    (folder / "NASA_access_log_Jul95.gz").write_bytes(gz_bytes((FIXTURES / "nasa_sample.log").read_bytes()))
+    with replay_client(dataset=folder / "NASA_access_log_Jul95") as c:
+        assert c.post("/api/demo/replay", json={"action": "start", "preset": "p-fast"}).status_code == 200
+        st = wait_finished(c)
+        assert st["error"] is None and st["lines_sent"] > 100
+    assert (folder / "NASA_access_log_Jul95").is_file()                                   # unpacked on first use
+
+
+def test_the_shipped_dataset_archive_is_the_unmodified_original():
+    """data/datasets/NASA_access_log_Jul95.gz is committed (the 205 MB raw file cannot be: GitHub's limit is 100 MB).
+    Pin its decompressed SHA-256 so a corrupted or altered copy is caught."""
+    import gzip
+    import hashlib
+    path = Path(__file__).resolve().parent.parent / "data" / "datasets" / "NASA_access_log_Jul95.gz"
+    assert path.is_file() and path.stat().st_size < 50_000_000        # under GitHub's 50 MB warning threshold
+    digest, newlines = hashlib.sha256(), 0
+    with gzip.open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            digest.update(chunk)
+            newlines += chunk.count(b"\n")
+    assert digest.hexdigest() == "96551161b5bdcaacbc3c17fa108191c478fb35dfe87895c16e34a8f6552bf29a"
+    assert newlines == 1_891_714                                       # 1,891,715 lines; the last one is the truncated `alyssa.p`

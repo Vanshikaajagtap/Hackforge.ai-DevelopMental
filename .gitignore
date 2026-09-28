@@ -1,4 +1,4 @@
-﻿__pycache__/
+__pycache__/
 *.pyc
 .env
 data/*
@@ -7,6 +7,8 @@ data/*
 !data/datasets/
 data/datasets/*
 !data/datasets/.gitkeep
+# the ~20 MB compressed dataset IS committed (GitHub rejects files > 100 MB, so the 205 MB raw file never is)
+!data/datasets/NASA_access_log_Jul95.gz
 .venv/
 .pytest_cache/
 

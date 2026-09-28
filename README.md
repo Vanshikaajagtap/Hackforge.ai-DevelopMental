@@ -187,10 +187,12 @@ WebSocket messages are `{"type", "data"}`: `hello` (full state on connect) · `m
 
 LogPulse also runs on a **real** access log: the public NASA Kennedy Space Center WWW server log for July 1995 (1.89 M requests, 27.6 days, Common Log Format).
 The traffic is real; the **error definition (4xx + 5xx) and every threshold are chosen settings** — nothing in the log labels an incident.
-Measurements, the tuning sweep and the reasoning: [docs/DATASET_ANALYSIS.md](docs/DATASET_ANALYSIS.md). Attribution: [ACKNOWLEDGEMENTS.md](ACKNOWLEDGEMENTS.md).
+Measurements, the tuning sweep and the reasoning: [docs/DATASET_ANALYSIS.md](docs/DATASET_ANALYSIS.md). Attribution and redistribution note: [ACKNOWLEDGEMENTS.md](ACKNOWLEDGEMENTS.md).
 
-**1. Get the file.** Download `NASA_access_log_Jul95.gz` from the Internet Traffic Archive (<http://ita.ee.lbl.gov/html/contrib/NASA-HTTP.html>), gunzip it, and put it here
-(git-ignored; never committed): `data/datasets/NASA_access_log_Jul95` (~205 MB; the name `access_log_Jul95` is accepted too).
+**1. The file is already in the repo — nothing to download.** `data/datasets/NASA_access_log_Jul95.gz` (19.5 MB) is the archive's data, gzip-compressed losslessly (a test pins its decompressed
+SHA-256). The first time you replay or analyse, LogPulse unpacks it next to itself into `data/datasets/NASA_access_log_Jul95` (~205 MB of free disk, about a second; also works inside Docker because compose
+mounts `./data`). The unpacked file is git-ignored — GitHub rejects files over 100 MB, so only the compressed copy is committed. A raw file already in that folder (also accepted under the name `access_log_Jul95`)
+is used as is; to use your own download, gunzip it from the Internet Traffic Archive (<http://ita.ee.lbl.gov/html/contrib/NASA-HTTP.html>) into the same place.
 
 **2. Analyse it** (streams the file, ~16 s, never loads it whole):
 
@@ -347,7 +349,7 @@ The latest measured results (test count, coverage, lint, the live NASA replay, s
 | Buttons missing | `DEMO_MODE` is not `true` | set it in `.env` and restart |
 | Health panel: `ntfy ⊘ disabled` / `sns ⊘ disabled` | that sink's variables are unset or placeholders (by design) | set them — see the sink table; the reason is shown on hover |
 | `ModuleNotFoundError: moto` / `pytest_cov` | dev dependencies missing | `pip install -r requirements-dev.txt` |
-| Replay: `409 dataset not found` | the raw log is not in `data/datasets/` | download it (see the NASA section); `access_log_Jul95` also works |
+| Replay: `409 dataset not found` / `could not be unpacked` | neither the raw file nor `NASA_access_log_Jul95.gz` is in `data/datasets/` (deleted?), or the disk is full / read-only | `git checkout data/datasets/NASA_access_log_Jul95.gz` (or download the log); free ~205 MB |
 | Replay runs but nothing alerts / thresholds look wrong | app is on the `demo` profile (10 %/15 %/25 % floors, 5xx-only errors, no URL-to-service mapping) | start with `LOGPULSE_PROFILE=nasa` — the dashboard warns when the profile is not `nasa` |
 | No AWS deliveries during a replay | intended: AWS is off during replays | only `replay.aws_preset` may opt in (`--aws`); see the NASA section |
 | Windows: tail seems to miss a rotated file | Windows cannot rename an open file; inode semantics differ | develop/run in Docker or WSL for rotation scenarios |

@@ -1779,7 +1779,7 @@ open http://localhost:8000   # click "Send test alert", then "Error spike"
 | **SNS email confirmation forgotten** | No email arrives | Verify in the §57.3 checklist (CLI smoke test + subscription status "Confirmed") |
 | **A long replay floods email / CloudWatch** | Hundreds of alert emails, log spam, cost | SNS + CloudWatch OFF during any replay (`replay.send_to_aws: false`); one opt-in preset; hard per-run cap; enforced server-side (§74.6) |
 | **Thresholds tuned on one site look like general accuracy** | Over-claiming | State that traffic is real but error definition and thresholds are chosen; document limits (§74.8, DATASET_ANALYSIS.md) |
-| **200 MB dataset committed by accident** | Bloated / slow repo | `data/datasets/*` git-ignored except `.gitkeep`; tests use small fixtures |
+| **The 205 MB raw dataset committed** | GitHub rejects files over 100 MB; bloated repo | only the 19.5 MB `NASA_access_log_Jul95.gz` is tracked (`.gitignore` un-ignores exactly that file); the unpacked raw file stays ignored; tests use small fixtures and a pinned checksum |
 
 ---
 
@@ -1968,7 +1968,7 @@ Appends the dataset to the real `LOG_PATH` the tailer watches. Options: `--prese
 - **Each API run** pauses the synthetic generator and resets detection (open alerts closed silently) so runs are reproducible.
 
 ### 74.5 Analysis (`scripts/analyze_dataset.py`)
-Streams the file: per-minute and per-service error rates, distribution stats, top windows by error-rate spike and by volume spike, longest silences,
+The dataset ships as `data/datasets/NASA_access_log_Jul95.gz` and `resolve_dataset_path()` unpacks it once, atomically, next to itself. Streams the file: per-minute and per-service error rates, distribution stats, top windows by error-rate spike and by volume spike, longest silences,
 robust threshold hints. `--simulate --profile nasa [--start --end]` runs the real parser → detector → alert state machine on a virtual clock and lists the alerts
 (the same code the app runs; used for tuning and in tests).
 

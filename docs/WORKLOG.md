@@ -144,3 +144,10 @@ volume-only surge (13 Jul) or the normal segment (16 Jul); an external replay wa
 
 **Not verified:** Docker (not installed); any real AWS; interactive browser use beyond a headless render; that thresholds generalise beyond this one month of this one site;
 per-service floors (not built - moderate `shuttle` spikes are not alerted).
+
+## Dataset shipped in the repo (feature/add-nasa-dataset)
+
+- `data/datasets/NASA_access_log_Jul95.gz` (19.5 MB, lossless gzip of the 205 MB log) is now tracked; the unpacked raw file stays git-ignored (GitHub's per-file limit is 100 MB).
+- `resolve_dataset_path()` unpacks the archive once, atomically, next to itself; a raw file already present always wins and is never overwritten.
+- 8 new tests (unpack once, raw wins, alternative name, broken archive leaves nothing behind, replay from a gz-only folder, API start, pinned SHA-256 + line count). Suite: 358 passed, 1 skipped; ruff clean.
+- README, ACKNOWLEDGEMENTS (redistribution terms still to be confirmed by a human), DATASET_ANALYSIS, PRD and DECISIONS (#13) updated.

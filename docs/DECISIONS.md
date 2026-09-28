@@ -59,3 +59,7 @@ service mapping and every threshold below are **choices**, not properties of the
     gives a working 3-command start with or without Docker. Secrets are never in the repository: `.env` is git-ignored and only placeholders are committed.
 12. **Provenance is documented.** `ACKNOWLEDGEMENTS.md` credits the NASA-HTTP dataset and every dependency (licenses read from package metadata) and flags the files that contain
     third-party or specification-derived material, so a reviewer can check them.
+13. **Ship the dataset compressed, unpack on first use.** GitHub rejects any file over 100 MB and the raw NASA log is 205 MB; the archive's own gzip is 19.5 MB. Only that `.gz` is committed
+    (the raw file stays git-ignored), the loader unpacks it once, atomically (temp file then rename, so a crash or two processes at once can never expose a half-written file), and a test pins the
+    decompressed SHA-256 so a corrupted or altered copy is caught. Alternatives considered: Git LFS (extra tooling and a storage quota for every clone) and asking every user to download it
+    (a manual step that the README steps would depend on). Redistribution terms of the archive still need a human check (ACKNOWLEDGEMENTS.md).
