@@ -12,6 +12,7 @@ ERROR_LEVELS = {"ERROR", "CRITICAL", "FATAL"}
 
 
 class ParseError(ValueError):
+    """A line that cannot become a LogEvent; it is counted and skipped, never fatal."""
     pass
 
 
@@ -31,7 +32,8 @@ def _parse_ts(value: object) -> float:
     raise ParseError("missing timestamp")
 
 
-def parse_line(line: str) -> LogEvent:
+def parse_line(line: str, error_min_status: int = 500) -> LogEvent:
+    """NDJSON line -> LogEvent. `error_min_status` comes from detector.error_definition (500 = only 5xx count)."""
     try:
         obj = json.loads(line)
     except json.JSONDecodeError as e:
@@ -51,7 +53,7 @@ def parse_line(line: str) -> LogEvent:
             raise ParseError(f"bad status: {str(status)[:20]!r}") from e
 
     level = str(obj["level"]).upper()
-    is_error = level in ERROR_LEVELS or (status is not None and 500 <= status <= 599)
+    is_error = level in ERROR_LEVELS or (status is not None and error_min_status <= status <= 599)
     request_id = obj.get("request_id")
     return LogEvent(
         ts=_parse_ts(obj["timestamp"]),
@@ -72,9 +74,9 @@ class IngestStats:
     parse_errors: int = 0
     dropped_events: int = 0                     # queue overflow (drop-oldest)
     parse_error_samples: deque = field(default_factory=lambda: deque(maxlen=20))
-    last_event_ts: float | None = None          # timestamp inside the last parsed event
     last_event_seen_at: float | None = None     # clock time we parsed it
 
     def record_error(self, line: str, reason: str) -> None:
+        """Count a bad line and keep a truncated sample for the health panel."""
         self.parse_errors += 1
         self.parse_error_samples.append({"line": line[:200], "reason": reason})

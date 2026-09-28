@@ -2,9 +2,14 @@ from __future__ import annotations
 
 import pytest
 
+from pathlib import Path
+
 from app.config import Settings, load_settings
 from app.detection.models import Snapshot
 from app.ingestion.models import LogEvent
+
+
+FIXTURES = Path(__file__).parent / "fixtures"      # small samples of the real NASA log (never the 200 MB file)
 
 
 class FakeClock:
@@ -80,23 +85,32 @@ def make_runtime(tmp_path, settings, clock):
     """Build a Runtime on a fake clock with fake sinks, a temp log file and a temp (or shared) DB - no real tasks."""
     from dataclasses import replace
     from app.main import Runtime
+    import sqlite3
+    made = []
 
-    def factory(sinks=None, db_path=None, log_path=None, queue_max=None, **env_overrides):
+    def factory(sinks=None, db_path=None, log_path=None, queue_max=None, base=None, **env_overrides):
         s = replace(
-            settings,
+            base or settings,
             log_path=str(log_path or tmp_path / "app.log"),
             db_path=str(db_path or ":memory:"),
             alerts_jsonl=str(tmp_path / "alerts.jsonl"),
-            ingestion=replace(settings.ingestion, start_at="checkpoint",
-                              queue_max=queue_max or settings.ingestion.queue_max),
+            ingestion=replace((base or settings).ingestion, start_at="checkpoint",
+                              queue_max=queue_max or (base or settings).ingestion.queue_max),
             **env_overrides,
         )
         rt = Runtime(s, clock=clock, sinks={"fake": RecordingSink()} if sinks is None else sinks)
         rt.ws = FakeWS()
         rt.hub._clients.add(rt.ws)
+        made.append(rt)
         return rt
 
-    return factory
+    yield factory
+    for rt in made:                                    # no leaked connections / file handles between tests
+        rt.tailer.close()
+        try:
+            rt.repo.db.close()
+        except sqlite3.Error:
+            pass
 
 
 def make_event(ts: float, is_error: bool = False, service: str = "svc") -> LogEvent:
@@ -125,3 +139,21 @@ def snap(ts: float = 0.0, service: str = "svc", sev: str = "NONE", z: float | No
     state = "LOW_DATA" if z is None else ("ANOMALY" if sev != "NONE" else "NORMAL")
     return Snapshot(ts=ts, service=service, total=total, errors=int(rate * total) if errors is None else errors,
                     error_rate=rate, baseline_mean=mean, baseline_std=std, z=z, ratio=ratio, state=state, severity=sev)
+
+
+@pytest.fixture
+def nasa_settings() -> Settings:
+    """The real `nasa` profile (CLF parser, 4xx+5xx errors, top-8 service mapping) scaled down so the 40-minute
+    fixture can warm up a baseline and show a burst: window 5 s = 5 original minutes at speed 60."""
+    from dataclasses import replace as rep
+    from app.config import SeverityRow
+    s = load_settings(env={"LOGPULSE_PROFILE": "nasa"})
+    return rep(
+        s,
+        profile=rep(s.profile, window_seconds=5, baseline_sample_every=1, baseline_max_samples=20, min_baseline_samples=4,
+                    min_events=10, level_shift_seconds=600),
+        severity=rep(s.severity, medium=SeverityRow(z=3, rate=0.12, ratio=24, errors=6),
+                     high=SeverityRow(z=5, rate=0.20, ratio=40, errors=10),
+                     critical=SeverityRow(z=8, rate=0.30, ratio=60, errors=16)),
+        replay=rep(s.replay, speed=60, max_gap_seconds=15),
+    )

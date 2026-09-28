@@ -1,3 +1,4 @@
+"""Discord / Slack incoming-webhook sink."""
 from __future__ import annotations
 
 import httpx
@@ -19,6 +20,7 @@ class WebhookSink:
         self._timeout = timeout
 
     async def send(self, alert: Alert, event: str) -> None:
+        """POST the rendered alert as JSON (Discord reads `content`, Slack reads `text`)."""
         text = render(alert, event, self.window_seconds)
         async with httpx.AsyncClient(timeout=self._timeout, transport=self._transport) as c:
             r = await c.post(self.url, json={"content": text, "text": text})

@@ -40,6 +40,7 @@ def _alert(row: sqlite3.Row) -> Alert:
 
 
 class Repository:
+    """All SQL in one place; methods degrade (log and flip `healthy`) instead of raising."""
     def __init__(self, db: Database) -> None:
         self.db = db
         self.healthy = True
@@ -47,11 +48,13 @@ class Repository:
 
     @property
     def status(self) -> str:
+        """'ok' or 'error', for the health panel."""
         return "ok" if self.healthy else "error"
 
     # ---- metric snapshots ------------------------------------------------------------------------
     @_safe(lambda: None)
     def save_snapshots(self, snaps: Iterable[Snapshot]) -> None:
+        """Store one tick of snapshots in a single transaction."""
         rows = [(s.ts, s.service, s.total, s.errors, s.error_rate, s.baseline_mean, s.baseline_std,
                  s.z, s.ratio, s.state, s.severity) for s in snaps]
         with self.db.lock:
@@ -62,6 +65,7 @@ class Repository:
 
     @_safe(lambda: [])
     def history(self, service: str, since_ts: float) -> list[dict]:
+        """Stored snapshots of a service since `since_ts`."""
         with self.db.lock:
             rows = self.db.conn.execute(
                 "SELECT ts,service,total,errors,error_rate,baseline_mean,baseline_std,z,ratio,state,severity"
@@ -70,11 +74,13 @@ class Repository:
 
     @_safe(lambda: [])
     def services(self) -> list[str]:
+        """Distinct services with stored snapshots."""
         with self.db.lock:
             return [r[0] for r in self.db.conn.execute("SELECT DISTINCT service FROM metric_snapshots ORDER BY 1")]
 
     @_safe(lambda: 0)
     def prune_snapshots(self, before_ts: float) -> int:
+        """Delete snapshots older than `before_ts`; returns how many."""
         with self.db.lock:
             n = self.db.conn.execute("DELETE FROM metric_snapshots WHERE ts<?", (before_ts,)).rowcount
             self.db.conn.commit()
@@ -105,6 +111,7 @@ class Repository:
     # ---- alerts ----------------------------------------------------------------------------------
     @_safe(lambda: None)
     def upsert_alert(self, a: Alert) -> None:
+        """Insert or update an alert."""
         d = asdict(a)
         cols = ",".join(_ALERT_COLS)
         marks = ",".join("?" for _ in _ALERT_COLS)
@@ -117,12 +124,14 @@ class Repository:
 
     @_safe(lambda: None)
     def get_alert(self, alert_id: str) -> Alert | None:
+        """One alert by id, or None."""
         with self.db.lock:
             row = self.db.conn.execute("SELECT * FROM alerts WHERE id=?", (alert_id,)).fetchone()
         return _alert(row) if row else None
 
     @_safe(lambda: [])
     def list_alerts(self, limit: int = 50, status: str | None = None) -> list[Alert]:
+        """Recent alerts, newest first, optionally filtered by status."""
         q, args = "SELECT * FROM alerts", []
         if status:
             q += " WHERE status=?"
@@ -133,11 +142,13 @@ class Repository:
             return [_alert(r) for r in self.db.conn.execute(q, args)]
 
     def open_alerts(self) -> list[Alert]:
+        """Alerts still OPEN."""
         return self.list_alerts(limit=1000, status="OPEN")   # (not wrapped: a nested success must not clear the error flag)
 
     # ---- deliveries ------------------------------------------------------------------------------
     @_safe(lambda: None)
     def add_delivery(self, alert_id: str, event: str, channel: str) -> int:
+        """Create a PENDING delivery row and return its id."""
         with self.db.lock:
             cur = self.db.conn.execute(
                 "INSERT INTO alert_deliveries(alert_id,event,channel,status,attempt_count) VALUES (?,?,?,'PENDING',0)",
@@ -159,6 +170,7 @@ class Repository:
 
     @_safe(lambda: [])
     def deliveries_for(self, alert_id: str) -> list[dict]:
+        """Delivery rows of one alert."""
         with self.db.lock:
             rows = self.db.conn.execute(
                 "SELECT * FROM alert_deliveries WHERE alert_id=? ORDER BY id", (alert_id,)).fetchall()
@@ -166,6 +178,7 @@ class Repository:
 
     @_safe(lambda: [])
     def pending_deliveries(self) -> list[dict]:
+        """Deliveries not yet delivered or failed (re-enqueued after a restart)."""
         with self.db.lock:
             rows = self.db.conn.execute("SELECT * FROM alert_deliveries WHERE status='PENDING' ORDER BY id").fetchall()
         return [dict(r) for r in rows]
@@ -173,6 +186,7 @@ class Repository:
     # ---- checkpoint ------------------------------------------------------------------------------
     @_safe(lambda: None)
     def save_checkpoint(self, source: str, inode: int, offset: int, updated_at: float) -> None:
+        """Store the tail position for a log file."""
         with self.db.lock:
             self.db.conn.execute(
                 "INSERT INTO checkpoints(source,inode,offset,updated_at) VALUES (?,?,?,?)"
@@ -182,12 +196,14 @@ class Repository:
 
     @_safe(lambda: None)
     def load_checkpoint(self, source: str) -> tuple[int, int] | None:
+        """The stored (inode, offset) for a log file, or None."""
         with self.db.lock:
             row = self.db.conn.execute("SELECT inode, offset FROM checkpoints WHERE source=?", (source,)).fetchone()
         return (row["inode"], row["offset"]) if row else None
 
     @_safe(lambda: False)
     def ping(self) -> bool:
+        """Cheap query proving the database is usable."""
         with self.db.lock:
             self.db.conn.execute("SELECT 1").fetchone()
         return True

@@ -3,5 +3,14 @@
 .env
 data/*
 !data/.gitkeep
+# datasets: keep the folder (via .gitkeep) but never commit what is dropped into it
+!data/datasets/
+data/datasets/*
+!data/datasets/.gitkeep
 .venv/
 .pytest_cache/
+
+# tooling output
+.coverage
+htmlcov/
+.ruff_cache/

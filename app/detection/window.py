@@ -1,3 +1,4 @@
+"""Time-based sliding window with running event and error counts."""
 from __future__ import annotations
 
 from collections import deque
@@ -16,12 +17,14 @@ class SlidingWindow:
         self.errors = 0
 
     def add(self, ts: float, is_error: bool, now: float) -> None:
+        """Insert an event, then evict whatever is now older than the window."""
         self._events.append((ts, is_error))
         self.total += 1
         self.errors += int(is_error)
         self.evict(now)
 
     def evict(self, now: float) -> None:
+        """Drop events older than now - window; also called every tick so a silent service decays."""
         cutoff = now - self.window_seconds
         ev = self._events
         while ev and ev[0][0] < cutoff:
@@ -31,4 +34,5 @@ class SlidingWindow:
 
     @property
     def error_rate(self) -> float:
+        """errors / total, or 0.0 for an empty window."""
         return self.errors / self.total if self.total else 0.0

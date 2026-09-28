@@ -30,6 +30,7 @@ async def _play(gen: LogGenerator, path: str, scenario: str, duration: float) ->
 
 
 def main() -> None:
+    """CLI entry point."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--scenario", choices=SCENARIOS, default="normal")
     ap.add_argument("--duration", type=float, help="seconds (default: 30, or the whole timeline for `mixed`)")

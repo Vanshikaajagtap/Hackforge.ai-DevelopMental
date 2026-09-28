@@ -8,6 +8,20 @@ from app.ingestion.parser import IngestStats, ParseError, parse_line
 from app.ingestion.tailer import Checkpoint, Tailer
 
 
+@pytest.fixture(autouse=True)
+def _close_tailers(monkeypatch):
+    """Close every Tailer a test creates so no file handle outlives the test."""
+    made, orig = [], Tailer.__init__
+
+    def init(self, *a, **kw):
+        orig(self, *a, **kw)
+        made.append(self)
+    monkeypatch.setattr(Tailer, "__init__", init)
+    yield
+    for t in made:
+        t.close()
+
+
 def line(**over):
     base = {"timestamp": "2026-01-01T00:00:00.000Z", "service": "pay", "level": "info",
             "status": 200, "message": "ok", "request_id": "r1"}

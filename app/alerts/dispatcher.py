@@ -18,6 +18,7 @@ log = logging.getLogger("logpulse.dispatch")
 
 @dataclass
 class Delivery:
+    """One (alert, channel, event) delivery to attempt; the alert is frozen as it was at event time."""
     delivery_id: int | None
     alert: Alert           # snapshot of the alert at event time (later mutation must not change retries)
     event: str
@@ -26,6 +27,7 @@ class Delivery:
 
 @dataclass
 class SinkStats:
+    """Per-channel delivery counters shown on the health panel."""
     success: int = 0
     failure: int = 0
     last_error: str | None = None
@@ -34,6 +36,7 @@ class SinkStats:
 
 
 class Dispatcher:
+    """Delivers alerts asynchronously with retry, backoff and a per-send timeout; never blocks detection."""
     def __init__(
         self,
         sinks: dict[str, AlertSink],
@@ -58,13 +61,16 @@ class Dispatcher:
         self.stats: dict[str, SinkStats] = {name: SinkStats() for name in sinks}
 
     def enqueue(self, delivery: Delivery) -> None:
+        """Queue a delivery for the background worker."""
         self._queue.put_nowait(delivery)
 
     @property
     def backlog(self) -> int:
+        """Deliveries queued or currently in flight."""
         return self._queue.qsize() + len(self._tasks)
 
     async def run(self) -> None:
+        """Worker loop: each queued delivery becomes its own task so one slow sink cannot delay the others."""
         try:
             while True:
                 d = await self._queue.get()

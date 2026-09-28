@@ -1,3 +1,4 @@
+"""Telegram Bot API sink (free push channel)."""
 from __future__ import annotations
 
 import httpx
@@ -21,6 +22,7 @@ class TelegramSink:
         self._timeout = timeout
 
     async def send(self, alert: Alert, event: str) -> None:
+        """Send the rendered alert to the configured chat."""
         async with httpx.AsyncClient(timeout=self._timeout, transport=self._transport) as c:
             r = await c.post(self.url, json={"chat_id": self.chat_id, "text": render(alert, event, self.window_seconds)})
             r.raise_for_status()

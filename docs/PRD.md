@@ -12,6 +12,8 @@
 > **Revision note — AWS integration.** The team now has an AWS account, so the last minimum requirement ("push alerts to AWS CloudWatch Logs or SNS") is made **live**
 > instead of mock-verified. Sections changed: §4, §4.1, §9, §26, §31–§34, §36, §37–§38, §41, §45, §49–§51, §57.3, §62, §64–§67, §69–§71, §73 and the demo timeline (§44).
 > The free channels (ntfy / Telegram / JSONL) stay as **redundant** channels. Detection never depends on AWS.
+>
+> **Revision note — real-dataset mode.** LogPulse also runs on the real NASA HTTP access log (Jul 1995): a Common Log Format parser with a config-driven field mapping, a `nasa` profile tuned on measured data, a safe replayer, and an analysis script. See **§74** (and `docs/DATASET_ANALYSIS.md`). The traffic is real; the error definition and thresholds are chosen settings.
 
 ---
 
@@ -1048,6 +1050,8 @@ GET  /api/system/status        # includes the "aws" startup-check panel
 WS   /ws
 POST /api/demo/scenario        # {"name":"normal|traffic_spike|error_spike|recover|mixed|malformed"} — only if DEMO_MODE=true
 POST /api/demo/test-alert      # only if DEMO_MODE=true: labelled fake alert through the real dispatcher + all sinks
+GET  /api/demo/replay          # only if DEMO_MODE=true: replay status, AWS-guard status, presets
+POST /api/demo/replay          # only if DEMO_MODE=true: {"action":"start|stop","preset":...,"speed":...,"aws":bool,"start":...,"end":...,"loop":bool,"seed":n}
 ```
 
 FastAPI's auto docs at `/docs` double as API documentation for the repo.
@@ -1276,6 +1280,11 @@ services:
     ports:
       - "8000:8000"
     env_file: .env
+    environment:               # container paths win over the local ones in .env
+      LOG_PATH: /data/app.log
+      DB_PATH: /data/logpulse.db
+      ALERTS_JSONL: /data/alerts.jsonl
+      DATASET_PATH: /data/datasets/NASA_access_log_Jul95
     volumes:
       - ./data:/data
     restart: unless-stopped
@@ -1310,7 +1319,7 @@ pyyaml
 httpx
 boto3
 ```
-Dev: `pytest pytest-asyncio moto[sns,logs]`
+Dev: `pytest pytest-asyncio pytest-cov moto[sns,logs] ruff`
 
 ---
 
@@ -1397,6 +1406,7 @@ Hackforge.ai-DevelopMental/
 │   ├── main.py                    # wiring, startup/shutdown, tasks
 │   ├── config.py                  # YAML + env loader, profile selection
 │   ├── generator.py               # demo log generator
+│   ├── replay.py                  # dataset replayer, AWS guard, controller, detector simulation
 │   ├── health.py                  # HEALTHY / DEGRADED / DOWN + AWS panel
 │   ├── api/
 │   │   ├── routes.py
@@ -1404,6 +1414,8 @@ Hackforge.ai-DevelopMental/
 │   ├── ingestion/
 │   │   ├── tailer.py
 │   │   ├── parser.py
+│   │   ├── clf.py                 # Common Log Format parser + field mapping
+│   │   ├── factory.py             # ndjson | clf | auto
 │   │   └── models.py              # LogEvent
 │   ├── detection/
 │   │   ├── window.py
@@ -1434,6 +1446,8 @@ Hackforge.ai-DevelopMental/
 │
 ├── scripts/
 │   ├── generate_logs.py
+│   ├── analyze_dataset.py         # stream + measure the NASA log; --simulate runs the real detector
+│   ├── replay_dataset.py          # replay the real log into the file the tailer watches
 │   └── benchmark.py
 │
 ├── tests/
@@ -1445,6 +1459,7 @@ Hackforge.ai-DevelopMental/
 │   ├── test_alerts.py
 │   ├── test_aws_sinks.py
 │   ├── test_storage.py  test_generator.py  test_health.py  test_api.py
+│   ├── test_clf.py  test_replay.py  test_nasa_e2e.py     # + tests/fixtures/ (a few hundred REAL lines)
 │   └── test_e2e.py
 │
 ├── docs/
@@ -1456,6 +1471,7 @@ Hackforge.ai-DevelopMental/
 ├── data/.gitkeep
 ├── config.yaml
 ├── iam-policy.json                # template, placeholders only
+├── data/datasets/                 # the raw NASA log goes here (git-ignored; only .gitkeep is tracked)
 ├── requirements.txt
 ├── Dockerfile
 ├── docker-compose.yml
@@ -1527,9 +1543,9 @@ EOF
 
 cat > .env.example <<'EOF'
 DEMO_MODE=true
-LOG_PATH=/data/app.log
-DB_PATH=/data/logpulse.db
-ALERTS_JSONL=/data/alerts.jsonl
+LOG_PATH=data/app.log            # local paths; docker-compose.yml overrides them with /data/... in the container
+DB_PATH=data/logpulse.db
+ALERTS_JSONL=data/alerts.jsonl
 NTFY_TOPIC=logpulse-CHANGE-ME-long-random
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
@@ -1761,6 +1777,9 @@ open http://localhost:8000   # click "Send test alert", then "Error spike"
 | **AWS credentials mis-set on demo day** | SNS/CloudWatch silent or failing | Startup check + health panel; **Send test alert** button before presenting; fallback channels |
 | **AWS key leaked to git** | Account abuse / cost | `.env` gitignored; least-privilege user; secret scanning; deactivate → delete → rotate |
 | **SNS email confirmation forgotten** | No email arrives | Verify in the §57.3 checklist (CLI smoke test + subscription status "Confirmed") |
+| **A long replay floods email / CloudWatch** | Hundreds of alert emails, log spam, cost | SNS + CloudWatch OFF during any replay (`replay.send_to_aws: false`); one opt-in preset; hard per-run cap; enforced server-side (§74.6) |
+| **Thresholds tuned on one site look like general accuracy** | Over-claiming | State that traffic is real but error definition and thresholds are chosen; document limits (§74.8, DATASET_ANALYSIS.md) |
+| **200 MB dataset committed by accident** | Bloated / slow repo | `data/datasets/*` git-ignored except `.gitkeep`; tests use small fixtures |
 
 ---
 
@@ -1826,6 +1845,9 @@ ML · Kafka · Redis · Kubernetes · LLM RCA · multi-tenancy · React · SMS
 | Sink failure | Detection continues; delivery shown as retrying/FAILED; other channels still deliver |
 | Docker | Fresh clone → `docker compose up --build` works |
 | Demo | Normal → traffic spike (no alert) → error spike → critical → recovery, reproducibly |
+| Real data: parsing | The NASA CLF log parses (incl. `-` bytes, zones, junk requests); the one truncated line is counted in `parse_errors`, nothing crashes |
+| Real data: detection | Replaying the real spike presets raises the expected alert (history HIGH, icons CRITICAL, cgi-bin CRITICAL); the real volume-only surge and a normal segment raise **none** |
+| Real data: AWS safety | During a replay SNS/CloudWatch are not called (default); only the configured preset may opt in; per-run AWS cap enforced; ntfy/Telegram/JSONL/dashboard unaffected |
 
 ---
 
@@ -1907,12 +1929,74 @@ Deploy:  Docker Compose on laptop (primary; AWS enabled on the demo machine) · 
 
 ---
 
+## 74. Real-Dataset Mode (NASA HTTP Access Log, Jul 1995)
+
+**Purpose.** Show LogPulse working on *real* traffic, not only a synthetic generator: the public NASA Kennedy Space Center log
+(1,891,715 lines, 27.6 days, Common Log Format). **Honesty:** the traffic is real; the error definition, the service mapping and every
+threshold are choices made here — the log does not label incidents. Measurements and the tuning sweep: `docs/DATASET_ANALYSIS.md`.
+
+### 74.1 Input: Common Log Format
+`host ident user [dd/Mon/yyyy:HH:MM:SS ±hhmm] "METHOD /path HTTP/1.0" status bytes`. Config `ingestion.format: ndjson | clf | auto`
+(auto: a line starting with `{` is NDJSON, otherwise CLF). Accepted: `-` byte counts, any zone offset, URLs containing spaces, junk in the
+method position, non-ASCII bytes. Unusable lines (the real truncated last line) raise `ParseError`, are counted in `parse_errors`, and never
+crash the pipeline. Files are split on `\n` only (real lines contain `\x0c` and `\x85`).
+
+### 74.2 Field mapping (config-driven)
+| LogEvent field | Rule |
+|---|---|
+| `service` | first URL path segment if listed in `mapping.service_prefixes` (top-N by volume, N = 8 → 98 % of traffic; `"/"` → `root`), else `other` |
+| `level` | `ERROR` for 5xx, `WARN` for 4xx, `INFO` otherwise |
+| `is_error` | `status ≥ min` where `detector.error_definition` is `"5xx"` (500), `"4xx+5xx"` (400) or a number. **NASA profile: `4xx+5xx`** — only 76 of 1.9 M lines are 5xx (0.004 %), 4xx+5xx is 0.58 % |
+| `request_id` | the client host |
+
+The definition is applied by the parser (also to NDJSON `status`); the detector only sees error / not-error.
+
+### 74.3 Profiles with overrides
+A profile may carry `overrides:` — sections deep-merged over the top-level ones for that profile only (`detector`, `severity`, `ingestion`,
+`mapping`, `generator`, `replay`). `LOGPULSE_PROFILE=nasa` selects: CLF parser, `4xx+5xx`, top-8 services, synthetic generator off, and
+window 10 s / baseline every 2 s / 30 samples / 10 warm-up samples / `min_events` 40 / level shift 120 s, tuned for replay speed 180
+(**1 wall second = 3 original minutes; the 10 s window = 30 original minutes**). Thresholds (derived in DATASET_ANALYSIS.md): rate floors
+**12 % / 20 % / 30 %**, ratio 24× / 40× / 60×, errors ≥ 12 / 16 / 24, z ≥ 5 / 8 / 12, `std_floor` 0.01, `warmup_ceiling` 0.05, `resolve_ratio` 3.
+
+### 74.4 Replayer (`scripts/replay_dataset.py`, `app/replay.py`, dashboard "Dataset replay" panel, `POST /api/demo/replay`)
+Appends the dataset to the real `LOG_PATH` the tailer watches. Options: `--preset`, `--start`, `--end`, `--speed`, `--seed`, `--loop`, `--max-gap`,
+`--format clf|ndjson`, `--aws`, `--list-presets`.
+- **Timestamps** rewritten to wall-clock now; original inter-arrival gaps ÷ `speed`; same-second requests spread across their second with a seeded RNG
+  (same seed → identical replay). The original timestamp is kept (`orig_ts="..."` in CLF, `orig_timestamp` in NDJSON).
+- **Long silences** are capped at `max_gap_seconds` (wall, after scaling), which must exceed the detector window so `LOW_DATA` still shows briefly.
+- **Seeking** by time is a binary search over the chronological file; the 200 MB file is never loaded.
+- **Each API run** pauses the synthetic generator and resets detection (open alerts closed silently) so runs are reproducible.
+
+### 74.5 Analysis (`scripts/analyze_dataset.py`)
+Streams the file: per-minute and per-service error rates, distribution stats, top windows by error-rate spike and by volume spike, longest silences,
+robust threshold hints. `--simulate --profile nasa [--start --end]` runs the real parser → detector → alert state machine on a virtual clock and lists the alerts
+(the same code the app runs; used for tuning and in tests).
+
+### 74.6 AWS safety during a replay
+`replay.send_to_aws: false` (default). While a replay runs — in-process, or an external script announcing itself through a heartbeat file next to `LOG_PATH` —
+SNS and CloudWatch deliveries are **not created**; ntfy, Telegram, console, JSONL and the dashboard are unaffected and detection never depends on any sink. Exactly one
+preset (`replay.aws_preset`) may opt in, the run must ask, and the app enforces `replay.aws_max_sends_per_run` (default 20, shared by both AWS sinks). The server decides;
+clients cannot override it. Tests and analysis never call AWS (the e2e tests fail if a boto3 client is created).
+
+### 74.7 Presets (real segments; verified with the real detector)
+`spike-history-jul24` (history HIGH, the AWS-capable preset), `spike-icons-jul12` (icons CRITICAL), `spike-cgibin-jul03` (cgi-bin CRITICAL),
+`volume-surge-jul13` (real 5–6× volume surge, unchanged error rate: **no alert**), `normal-jul16` (**no alert**).
+
+### 74.8 Tests and limits
+Tests: CLF parser (valid, `-` bytes, zones, malformed, real oddities), mapping and error definitions, replayer timestamp rewrite / gap scaling / gap cap / seeking,
+the AWS guard, the API, and end-to-end on `tests/fixtures/` (a few hundred real lines). **Limits:** one global set of floors cannot suit every service — `history` and
+`other` are intrinsically bursty (routine p99 ≈ 10 %), so moderate spikes in quiet services such as `shuttle` are not alerted; per-service floors are not built;
+`other` is a catch-all, not a service; thresholds were tuned on one month of one site.
+
+---
+
 ## Appendix — Sources Consulted for Free-Stack Decisions
 
 - Render changelog: free web services stay active while receiving WebSocket messages (spin-down after 15 min without HTTP request or incoming WebSocket message) — https://render-www.onrender.com/changelog/free-web-services-now-remain-active-while-receiving-websocket-messages
 - ntfy project (HTTP pub-sub, no signup, topic as password) — https://github.com/binwiederhier/ntfy
 - LocalStack image consolidation requiring an auth token (March 2026) — https://github.com/elgohr/go-localstack/issues/1021
 - AWS Free Tier update (credits, 6-month free plan, always-free services) — https://aws.amazon.com/about-aws/whats-new/2025/07/aws-free-tier-credits-month-free-plan/
+- NASA HTTP logs (Internet Traffic Archive), July 1995 — http://ita.ee.lbl.gov/html/contrib/NASA-HTTP.html
 - Telegram bot flood-limit guidance (python-telegram-bot wiki) — https://github.com/python-telegram-bot/python-telegram-bot/wiki/Avoiding-flood-limits
 
 Free-tier terms change; re-verify limits (ntfy daily cap, Render behavior, AWS plan) the day you build.

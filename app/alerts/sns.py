@@ -1,3 +1,4 @@
+"""AWS SNS sink: publishes the alert as an email notification."""
 from __future__ import annotations
 
 import asyncio
@@ -26,6 +27,7 @@ class SnsSink:
         self.client = client or aws_session(region).client("sns", config=BOTO_CFG)
 
     async def send(self, alert: Alert, event: str) -> str:
+        """Publish the alert; returns the SNS MessageId as proof of delivery."""
         def _publish() -> str:
             resp = self.client.publish(
                 TopicArn=self.arn,
@@ -42,4 +44,5 @@ class SnsSink:
         return await asyncio.to_thread(_publish)
 
     async def healthcheck(self) -> None:
+        """Verify the topic is reachable (sns:GetTopicAttributes)."""
         await asyncio.to_thread(self.client.get_topic_attributes, TopicArn=self.arn)
