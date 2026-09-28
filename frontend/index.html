@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LogPulse</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --border: rgba(255,255,255,.10);
+    --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835;
+    --series: #3987e5;
+    --good: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--ink); }
+  main { max-width: 1120px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  h1 { font-size: 20px; margin: 0; font-weight: 650; letter-spacing: .02em; }
+  h1 small { color: var(--muted); font-weight: 400; font-size: 13px; margin-left: 8px; }
+  h2 { font-size: 12px; margin: 0 0 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
+  .head-right { display: flex; gap: 14px; align-items: center; font-size: 13px; color: var(--ink-2); }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+  .kpi .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .kpi .value { font-size: 28px; font-weight: 650; margin-top: 4px; }
+  .kpi .sub { font-size: 12px; color: var(--ink-2); margin-top: 2px; min-height: 16px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 650; padding: 3px 10px;
+          border-radius: 999px; border: 1px solid var(--border); }
+  .kpi .chip { margin-top: 6px; font-size: 15px; }
+  [data-tone="good"] { color: var(--good); } [data-tone="warn"] { color: var(--warning); }
+  [data-tone="serious"] { color: var(--serious); } [data-tone="bad"] { color: var(--critical); }
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+  .tab, button { font: inherit; font-size: 13px; color: var(--ink-2); background: transparent; border: 1px solid var(--axis);
+                 border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  .tab:hover, button:hover { background: rgba(255,255,255,.06); color: var(--ink); }
+  .tab[aria-selected="true"] { color: var(--ink); border-color: var(--series); }
+  .chart-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+  .legend { display: flex; gap: 16px; font-size: 12px; color: var(--ink-2); flex-wrap: wrap; }
+  .legend i { display: inline-block; width: 16px; height: 0; border-top: 2px solid var(--series); vertical-align: middle; margin-right: 6px; }
+  .legend i.dash { border-top: 2px dashed var(--ink-2); }
+  .legend i.band { height: 10px; border: 0; background: rgba(57,135,229,.22); }
+  .legend i.mark { width: 0; height: 0; border: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 9px solid var(--critical); }
+  .chart-wrap { position: relative; height: 320px; }
+  .alerts { display: grid; gap: 8px; }
+  .alert { border: 1px solid var(--axis); border-left-width: 4px; border-radius: 8px; padding: 10px 12px; display: grid; gap: 4px; }
+  .alert[data-sev="MEDIUM"] { border-left-color: var(--warning); }
+  .alert[data-sev="HIGH"] { border-left-color: var(--serious); }
+  .alert[data-sev="CRITICAL"] { border-left-color: var(--critical); }
+  .alert.resolved { opacity: .72; }
+  .alert-top { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+  .sev { font-weight: 700; font-size: 13px; }
+  .alert-svc { font-weight: 600; }
+  .alert-meta, .alert-reason { font-size: 12px; color: var(--ink-2); }
+  .badges { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+  .badge { font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--axis); color: var(--ink-2); }
+  .badge[data-s="DELIVERED"] { color: var(--good); } .badge[data-s="FAILED"] { color: var(--critical); }
+  .badge[data-s="RETRY"] { color: var(--warning); }
+  .empty { color: var(--muted); font-size: 13px; }
+  .demo { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .demo .title { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-right: 6px; }
+  button[aria-pressed="true"] { color: var(--ink); border-color: var(--series); background: rgba(57,135,229,.14); }
+  .note { font-size: 12px; color: var(--muted); }
+  .health { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px 16px; font-size: 13px; }
+  .health b { display: block; font-size: 12px; color: var(--muted); font-weight: 400; }
+  .health-top { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+  .sinks { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; font-size: 13px; }
+  .samples { margin-top: 10px; font-size: 12px; color: var(--muted); }
+  .samples code { color: var(--ink-2); word-break: break-all; }
+  @media (max-width: 560px) { .kpi .value { font-size: 24px; } .chart-wrap { height: 260px; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>LogPulse <small id="profile"></small></h1>
+    <div class="head-right"><span class="chip" id="h-status" data-tone="warn">◔ CONNECTING</span><span id="conn">⏳ connecting…</span></div>
+  </header>
+
+  <section class="kpis" aria-label="Key metrics">
+    <div class="card kpi"><div class="label">Error rate</div><div class="value" id="k-rate">–</div><div class="sub" id="k-rate-sub">&nbsp;</div></div>
+    <div class="card kpi"><div class="label">Baseline ± σ</div><div class="value" id="k-base">–</div><div class="sub" id="k-base-sub">&nbsp;</div></div>
+    <div class="card kpi"><div class="label">Events / s</div><div class="value" id="k-eps">–</div><div class="sub" id="k-eps-sub">&nbsp;</div></div>
+    <div class="card kpi"><div class="label">Active alerts</div><div class="value" id="k-alerts">0</div><div class="sub" id="k-alerts-sub">&nbsp;</div></div>
+    <div class="card kpi"><div class="label">State</div><span class="chip" id="k-state" data-tone="warn">◔ WARMUP</span><div class="sub" id="k-state-sub">&nbsp;</div></div>
+  </section>
+
+  <section class="card">
+    <div class="chart-head">
+      <div class="tabs" id="tabs" role="tablist" aria-label="Service"></div>
+      <div class="legend">
+        <span><i></i>Error rate</span><span><i class="dash"></i>Baseline</span><span><i class="band"></i>±1σ band</span><span><i class="mark"></i>Alert opened</span>
+      </div>
+    </div>
+    <div class="chart-wrap"><canvas id="chart" role="img" aria-label="Error rate over the last five minutes against its baseline, with alert markers"></canvas></div>
+  </section>
+
+  <section class="card">
+    <h2>Alerts</h2>
+    <div class="alerts" id="alerts"><div class="empty">No alerts yet.</div></div>
+  </section>
+
+  <section class="card">
+    <h2>Detector health</h2>
+    <div class="health-top"><span id="h-reasons" class="note">&nbsp;</span></div>
+    <div class="health">
+      <div><b>Tail lag</b><span id="h-lag">–</span></div>
+      <div><b>Events / s</b><span id="h-eps">–</span></div>
+      <div><b>Parse errors</b><span id="h-perr">–</span></div>
+      <div><b>Queue depth</b><span id="h-queue">–</span></div>
+      <div><b>Late / dropped</b><span id="h-late">–</span></div>
+      <div><b>Detection latency</b><span id="h-det">–</span></div>
+      <div><b>Database</b><span id="h-db">–</span></div>
+      <div><b>Log file</b><span id="h-file">–</span></div>
+      <div><b>Last event</b><span id="h-last">–</span></div>
+      <div><b>Silent services</b><span id="h-silent">–</span></div>
+    </div>
+    <div class="sinks" id="h-sinks"></div>
+    <div class="sinks" id="h-aws" aria-label="AWS status"></div>
+    <div class="samples" id="h-samples" hidden></div>
+  </section>
+
+  <section class="card demo" id="demo" hidden>
+    <span class="title">Demo</span>
+    <button data-scn="normal">Normal</button>
+    <button data-scn="error_spike">Error spike</button>
+    <button data-scn="traffic_spike">Traffic spike (no alert expected)</button>
+    <button data-scn="recover">Recover</button>
+    <button data-scn="mixed">Mixed (2-min story)</button>
+    <button data-scn="malformed">Malformed lines</button>
+    <button id="test-alert" title="Sends a labelled fake alert through the real dispatcher to every configured sink (SNS, CloudWatch, ntfy, Telegram, JSONL)">Send test alert</button>
+    <span class="note" id="demo-note"></span>
+  </section>
+</main>
+
+<script src="/static/chart.umd.min.js"></script>
+<script>
+(() => {
+  const MAX_POINTS = 300;                 // ~5 min at 1 tick/s
+  const $ = (id) => document.getElementById(id);
+  const pct = (v, d = 1) => (v == null ? '–' : (v * 100).toFixed(d) + '%');
+  const hms = (ts) => new Date(ts * 1000).toLocaleTimeString([], { hour12: false });
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+  const STATE = { NORMAL: ['✔', 'good'], ANOMALY: ['▲', 'bad'], WARMUP: ['◔', 'warn'], LOW_DATA: ['◌', 'warn'] };
+  const HEALTH = { HEALTHY: ['✔', 'good'], DEGRADED: ['▲', 'warn'], DOWN: ['✖', 'bad'] };
+  const SEV = { MEDIUM: ['●', 'var(--warning)'], HIGH: ['◆', 'var(--serious)'], CRITICAL: ['▲', 'var(--critical)'] };
+
+  const series = {};                      // service -> snapshots
+  const alerts = new Map();               // id -> alert view
+  let selected = null, config = { window_seconds: 10 };
+
+  // ---- chart ---------------------------------------------------------------------------------
+  const css = getComputedStyle(document.documentElement);
+  const c = (n) => css.getPropertyValue(n).trim();
+  const crosshair = {
+    id: 'crosshair',
+    afterDatasetsDraw(chart) {
+      const a = chart.tooltip && chart.tooltip.getActiveElements();
+      if (!a || !a.length) return;
+      const { ctx, chartArea } = chart, x = a[0].element.x;
+      ctx.save(); ctx.strokeStyle = c('--axis'); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(x, chartArea.top); ctx.lineTo(x, chartArea.bottom); ctx.stroke(); ctx.restore();
+    },
+  };
+  let markerInfo = {};
+  const chart = new Chart($('chart'), {
+    type: 'line',
+    plugins: [crosshair],
+    data: { labels: [], datasets: [
+      { label: 'Error rate', data: [], borderColor: c('--series'), borderWidth: 2, pointRadius: 0, pointHoverRadius: 4,
+        pointHoverBackgroundColor: c('--series'), pointHoverBorderColor: c('--surface'), pointHoverBorderWidth: 2, tension: 0.2, order: 2 },
+      { label: 'Baseline', data: [], borderColor: c('--ink-2'), borderWidth: 1.5, borderDash: [5, 4], pointRadius: 0, pointHoverRadius: 0, order: 3 },
+      { label: 'lower', data: [], borderWidth: 0, pointRadius: 0, pointHoverRadius: 0, fill: false, order: 5 },
+      { label: 'upper', data: [], borderWidth: 0, pointRadius: 0, pointHoverRadius: 0, backgroundColor: 'rgba(57,135,229,.22)', fill: '-1', order: 4 },
+      { label: 'Alert opened', data: [], showLine: false, pointStyle: 'triangle', pointRadius: 8, pointHoverRadius: 9,
+        backgroundColor: c('--critical'), borderColor: c('--surface'), borderWidth: 2, order: 1 },
+    ]},
+    options: {
+      animation: false, responsive: true, maintainAspectRatio: false, spanGaps: false,
+      interaction: { mode: 'index', intersect: false },
+      scales: {
+        x: { ticks: { color: c('--muted'), maxTicksLimit: 6, maxRotation: 0 }, grid: { display: false }, border: { color: c('--axis') } },
+        y: { min: 0, suggestedMax: 0.2, ticks: { color: c('--muted'), callback: (v) => Math.round(v * 100) + '%' },
+             grid: { color: c('--grid') }, border: { display: false } },
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          filter: (i) => ['Error rate', 'Baseline', 'Alert opened'].includes(i.dataset.label) && i.parsed.y != null,
+          backgroundColor: c('--surface'), borderColor: c('--axis'), borderWidth: 1,
+          titleColor: c('--ink-2'), bodyColor: c('--ink'), padding: 10,
+          callbacks: {
+            label: (i) => i.dataset.label === 'Alert opened'
+              ? `Alert opened${markerInfo[i.dataIndex] ? ' (' + markerInfo[i.dataIndex] + ')' : ''}`
+              : `${i.dataset.label}: ${pct(i.parsed.y)}`,
+            afterBody: (items) => {
+              const s = (series[selected] || [])[items[0].dataIndex];
+              return s ? [`z: ${s.z == null ? '–' : s.z.toFixed(2)}`, `${s.errors} errors / ${s.total} events`] : [];
+            },
+          },
+        },
+      },
+    },
+  });
+
+  function redrawChart() {
+    const pts = series[selected] || [];
+    const d = chart.data;
+    d.labels = pts.map((s) => hms(s.ts));
+    // a window with fewer than min_events events says nothing about the rate (1 error of 1 event = 100 %): leave a gap
+    d.datasets[0].data = pts.map((s) => (s.total < (config.min_events || 0) ? null : s.error_rate));
+    d.datasets[1].data = pts.map((s) => s.baseline_mean);
+    d.datasets[2].data = pts.map((s) => s.baseline_mean == null ? null : Math.max(0, s.baseline_mean - s.baseline_std));
+    d.datasets[3].data = pts.map((s) => s.baseline_mean == null ? null : s.baseline_mean + s.baseline_std);
+    const marks = pts.map(() => null); markerInfo = {};
+    for (const a of alerts.values()) {
+      if (a.service !== selected || !pts.length || a.created_at < pts[0].ts - 1) continue;
+      let idx = pts.findIndex((s) => s.ts >= a.created_at - 0.5);
+      if (idx < 0) idx = pts.length - 1;
+      marks[idx] = pts[idx].error_rate; markerInfo[idx] = a.peak_severity;
+    }
+    d.datasets[4].data = marks;
+    chart.update('none');
+  }
+
+  // ---- KPIs / tabs ---------------------------------------------------------------------------
+  function setChip(node, table, key, label) {
+    const [icon, tone] = table[key] || ['•', 'warn'];
+    node.dataset.tone = tone; node.textContent = `${icon} ${label || key}`;
+  }
+
+  function renderKpis() {
+    const pts = series[selected] || [];
+    const s = pts[pts.length - 1];
+    if (s) {
+      $('k-rate').textContent = pct(s.error_rate);
+      $('k-rate-sub').textContent = `${s.errors} errors / ${s.total} events`;
+      $('k-base').textContent = pct(s.baseline_mean);
+      $('k-base-sub').textContent = s.baseline_std == null ? 'learning…' : `± ${pct(s.baseline_std)}${s.z == null ? '' : ' · z ' + s.z.toFixed(1)}`;
+      $('k-eps').textContent = (s.total / config.window_seconds).toFixed(1);
+      $('k-eps-sub').textContent = `${s.total} in ${config.window_seconds}s window`;
+      setChip($('k-state'), STATE, s.state, s.state.replace('_', ' '));
+      $('k-state-sub').textContent = s.severity !== 'NONE' ? `severity ${s.severity}` : (s.state === 'WARMUP' ? 'alerts suppressed' : '');
+    }
+    const open = [...alerts.values()].filter((a) => a.status === 'OPEN');
+    $('k-alerts').textContent = open.length;
+    $('k-alerts-sub').textContent = open.length ? open.map((a) => `${a.service} ${a.severity}`).join(' · ') : 'all clear';
+  }
+
+  function renderTabs() {
+    const names = Object.keys(series).sort();
+    if (!selected && names.length) {          // open on the service that needs attention, else the first
+      const hot = [...alerts.values()].find((a) => a.status === 'OPEN' && names.includes(a.service));
+      selected = hot ? hot.service : names[0];
+    }
+    const tabs = $('tabs');
+    if (tabs.children.length !== names.length) {
+      tabs.replaceChildren(...names.map((n) => {
+        const b = el('button', 'tab', n);
+        b.setAttribute('role', 'tab');
+        b.onclick = () => { selected = n; renderTabs(); redrawChart(); renderKpis(); };
+        return b;
+      }));
+    }
+    [...tabs.children].forEach((b) => b.setAttribute('aria-selected', String(b.textContent === selected)));
+  }
+
+  // ---- alerts --------------------------------------------------------------------------------
+  function badge(d) {
+    const retry = d.status === 'PENDING' && d.attempt_count > 0;
+    const mark = d.status === 'DELIVERED' ? '✓' : d.status === 'FAILED' ? '✗' : retry ? '⟳' : '…';
+    const word = retry ? `retrying (${d.attempt_count})` : d.status === 'PENDING' ? 'pending' : d.status.toLowerCase();
+    const b = el('span', 'badge', `${d.channel} · ${d.event} ${mark} ${word}`);
+    b.dataset.s = retry ? 'RETRY' : d.status;
+    // hover: the proof of delivery (SNS MessageId / CloudWatch group:stream) or the last error
+    const tip = [d.external_id && `id: ${d.external_id}`, d.error_message].filter(Boolean).join(' | ');
+    if (tip) b.title = tip;
+    return b;
+  }
+
+  function alertNode(a) {
+    const [icon, color] = SEV[a.severity] || ['●', 'var(--muted)'];
+    const n = el('div', 'alert' + (a.status === 'RESOLVED' ? ' resolved' : ''));
+    n.dataset.sev = a.peak_severity;
+    const top = el('div', 'alert-top');
+    const isTest = a.id.startsWith('test-');
+    const sev = el('span', 'sev', isTest ? `◇ TEST · ${a.severity}` : `${icon} ${a.status === 'RESOLVED' ? 'RESOLVED' : a.severity}`);
+    sev.style.color = isTest ? 'var(--muted)' : a.status === 'RESOLVED' ? 'var(--good)' : color;
+    top.append(sev, el('span', 'alert-svc', a.service),
+      el('span', 'alert-meta', `opened ${hms(a.created_at)}` + (a.resolved_at ? ` · resolved ${hms(a.resolved_at)}` : '')
+        + (a.peak_severity !== a.severity || a.status === 'RESOLVED' ? ` · peak ${a.peak_severity}` : '')));
+    const meta = el('div', 'alert-meta',
+      `${pct(a.current_rate)} vs baseline ${pct(a.baseline_rate)} · ${a.ratio.toFixed(1)}× · z=${a.z.toFixed(2)} · ${a.sample_size} events`);
+    const reason = el('div', 'alert-reason', a.reason);
+    const badges = el('div', 'badges');
+    (a.deliveries || []).forEach((d) => badges.append(badge(d)));
+    n.append(top, meta, reason, badges);
+    return n;
+  }
+
+  function renderAlerts() {
+    const list = [...alerts.values()].sort((x, y) => y.created_at - x.created_at).slice(0, 25);
+    $('alerts').replaceChildren(...(list.length ? list.map(alertNode) : [el('div', 'empty', 'No alerts yet.')]));
+    renderKpis();
+  }
+
+  // ---- health --------------------------------------------------------------------------------
+  function renderAws(aws) {
+    if (!aws) return;
+    if (!aws.enabled) { $('h-aws').replaceChildren(el('span', 'note', 'AWS: off (AWS_ENABLED=false) - ntfy / Telegram / JSONL still deliver')); return; }
+    const chips = [['aws_identity', 'AWS identity'], ['sns', 'SNS'], ['cloudwatch', 'CloudWatch']].map(([key, label]) => {
+      const v = String(aws[key]);
+      const ok = v === 'ok', bad = v.startsWith('error') || v.startsWith('unchecked');
+      const b = el('span', 'badge', `${label} ${ok ? '✓ ok' : bad ? '✗ ' + v : '… ' + v}`);   // icon + text, never colour alone
+      b.dataset.s = ok ? 'DELIVERED' : bad ? 'FAILED' : '';
+      b.title = v;
+      return b;
+    });
+    $('h-aws').replaceChildren(...chips);
+  }
+
+  function renderHealth(h) {
+    setChip($('h-status'), HEALTH, h.status);
+    $('h-reasons').textContent = h.reasons.length ? h.reasons.join(' · ') : 'all systems nominal';
+    $('h-lag').textContent = `${(h.tail_lag_ms / 1000).toFixed(2)} s`;
+    $('h-eps').textContent = h.events_per_second;
+    $('h-perr').textContent = h.parse_errors.toLocaleString();
+    $('h-queue').textContent = `${h.queue_depth} / ${h.queue_capacity}`;
+    $('h-late').textContent = `${h.late_events} / ${h.dropped_events}`;
+    $('h-det').textContent = `${h.detection_latency_ms} ms/tick`;
+    $('h-db').textContent = h.db_status === 'ok' ? '✔ ok' : '✖ error';
+    $('h-file').textContent = h.file_status === 'ok' ? '✔ ok' : '✖ missing';
+    $('h-last').textContent = h.last_event_age_seconds == null ? 'none yet' : `${h.last_event_age_seconds}s ago`;
+    $('h-silent').textContent = h.silent_services.length ? h.silent_services.join(', ') : 'none';
+    const sinkIcon = { ok: '✓', failing: '✗', idle: '·', disabled: '⊘' };
+    $('h-sinks').replaceChildren(...Object.entries(h.sinks).map(([name, s]) => {
+      const b = el('span', 'badge', `${name} ${sinkIcon[s.status] || ''} ${s.status}`);
+      b.dataset.s = s.status === 'ok' ? 'DELIVERED' : s.status === 'failing' ? 'FAILED' : '';
+      if (s.last_error) b.title = s.last_error;
+      return b;
+    }));
+    renderAws(h.aws);
+    const box = $('h-samples');
+    box.hidden = !h.parse_error_samples.length;
+    if (!box.hidden) {
+      box.replaceChildren(el('div', null, 'Recent malformed lines:'),
+        ...h.parse_error_samples.slice(-3).map((s) => { const d = el('div'); d.append(el('code', null, s.line), ` — ${s.reason}`); return d; }));
+    }
+  }
+
+  // ---- WebSocket -----------------------------------------------------------------------------
+  const push = (s) => { const a = (series[s.service] ||= []); a.push(s); if (a.length > MAX_POINTS) a.shift(); };
+  const upsertAlert = (a) => alerts.set(a.id, a);
+
+  let ws, retry = 0;
+  function connect() {
+    ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
+    ws.onopen = () => { retry = 0; $('conn').textContent = '● live'; };
+    ws.onclose = () => {
+      $('conn').textContent = '⏳ reconnecting…';
+      setTimeout(connect, Math.min(1000 * 2 ** retry++, 10000));
+    };
+    ws.onmessage = (e) => {
+      const { type, data } = JSON.parse(e.data);
+      switch (type) {
+        case 'hello':
+          config = data.config;
+          $('profile').textContent = `profile: ${config.profile}`;
+          Object.keys(series).forEach((k) => delete series[k]);
+          alerts.clear();
+          for (const [svc, pts] of Object.entries(data.history)) series[svc] = pts.slice(-MAX_POINTS);
+          data.alerts.forEach(upsertAlert);
+          $('demo').hidden = !config.demo_mode;
+          markScenario(data.scenario);
+          renderHealth(data.health);
+          renderAlerts();
+          break;
+        case 'metric.update': push(data); break;
+        case 'alert.created': case 'alert.updated': case 'alert.resolved': upsertAlert(data); renderAlerts(); break;
+        case 'health.update': renderHealth(data); return;
+        default: return;
+      }
+      renderTabs();
+      if (!series[selected]) selected = Object.keys(series)[0];
+      redrawChart(); renderKpis();
+    };
+  }
+  setInterval(() => { if (ws && ws.readyState === 1) ws.send('{"type":"ping"}'); }, 60000);
+
+  // ---- demo buttons --------------------------------------------------------------------------
+  const markScenario = (name) => document.querySelectorAll('#demo button[data-scn]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.scn === name)));
+  document.querySelectorAll('#demo button[data-scn]').forEach((b) => b.onclick = async () => {
+    const r = await fetch('/api/demo/scenario', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: b.dataset.scn }) });
+    if (r.ok) { markScenario(b.dataset.scn); $('demo-note').textContent = `scenario: ${b.dataset.scn}`; }
+    else $('demo-note').textContent = `failed: ${r.status}`;
+  });
+  $('test-alert').onclick = async () => {
+    const r = await fetch('/api/demo/test-alert', { method: 'POST' });
+    $('demo-note').textContent = r.ok ? `test alert queued -> ${(await r.json()).sinks.join(', ')} (watch the badges below)` : `test alert failed: ${r.status}`;
+  };
+
+  connect();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,77 @@
+profile: demo                      # demo | prod   (override with env LOGPULSE_PROFILE)
+
+profiles:
+  demo:
+    window_seconds: 10
+    tick_seconds: 1
+    baseline_sample_every: 2
+    baseline_max_samples: 30
+    min_baseline_samples: 10
+    min_events: 30
+    level_shift_seconds: 120
+  prod:
+    window_seconds: 60
+    tick_seconds: 1
+    baseline_sample_every: 10
+    baseline_max_samples: 30
+    min_baseline_samples: 10
+    min_events: 20
+    level_shift_seconds: 900
+
+detector:
+  std_floor: 0.02
+  ratio_floor: 0.005               # denominator floor for ratio = rate / max(mean, ratio_floor)
+  warmup_ceiling: 0.25
+  confirm_ticks: 2
+  resolve_ticks: 3
+  resolve_z: 1.5
+  resolve_ratio: 1.5
+
+severity:
+  medium:   {z: 2.0, rate: 0.10, ratio: 1.5, errors: 5}
+  high:     {z: 3.0, rate: 0.15, ratio: 3.0, errors: 5}
+  critical: {z: 4.0, rate: 0.25, ratio: 5.0, errors: 10}
+
+alerts:
+  retry_attempts: 3
+  retry_backoff_seconds: 2
+  sink_timeout_seconds: 10
+  # sns / cloudwatch are only built when AWS_ENABLED=true AND their env vars are set; every other sink is skipped
+  # (and shown as "disabled" on the health panel) until its own env vars are configured. Add `webhook` for Discord/Slack.
+  sinks: [console, jsonl, sns, cloudwatch, ntfy, telegram]
+
+ingestion:
+  start_at: end                               # end | checkpoint  (used only when no valid checkpoint exists)
+  poll_seconds: 0.2
+  queue_max: 10000
+  checkpoint_every_seconds: 2
+
+storage:
+  snapshot_retention_hours: 24
+  prune_every_seconds: 600
+  hello_history_minutes: 5
+
+health:
+  degraded_queue_fraction: 0.8
+  degraded_tail_lag_seconds: 5
+  events_per_second_span_seconds: 5
+  silence_windows: 3                          # service silent for N x window (after baseline is ready) -> dashboard "silent"
+
+generator:                                    # demo log generator (scripts/generate_logs.py + dashboard buttons)
+  services: {payment-service: 9, auth-service: 6}   # events/s per service at 1x volume (~15 total)
+  normal_error_rate: 0.05
+  normal_error_drift: 0.01                    # slow +/- wobble so "normal" is 4-6 %
+  error_spike_start_rate: 0.06
+  error_spike_rate: 0.15
+  critical_spike_rate: 0.38
+  error_spike_ramp_seconds: 3                 # 6 % -> 15 %
+  error_spike_escalate_after_seconds: 15      # then 38 %
+  traffic_spike_multiplier: 5
+  spike_service: payment-service              # error scenarios degrade this service only
+  malformed_every: 40                         # `malformed` scenario: one broken line per N
+  mixed_timeline:                             # [start_second, scenario] - the 2-minute demo story
+    - [0, normal]
+    - [25, traffic_spike]
+    - [35, error_spike]
+    - [70, recover]
+    - [110, normal]
