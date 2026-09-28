@@ -5,13 +5,13 @@
       "Sid": "PublishAlerts",
       "Effect": "Allow",
       "Action": ["sns:Publish", "sns:GetTopicAttributes"],
-      "Resource": "arn:aws:sns:ap-south-1:<ACCOUNT_ID>:logpulse-alerts"
+      "Resource": "arn:aws:sns:ap-south-1:506318771034:logpulse-alerts"
     },
     {
       "Sid": "WriteAlertLogs",
       "Effect": "Allow",
       "Action": ["logs:CreateLogStream", "logs:PutLogEvents"],
-      "Resource": "arn:aws:logs:ap-south-1:<ACCOUNT_ID>:log-group:/logpulse/alerts:*"
+      "Resource": "arn:aws:logs:ap-south-1:506318771034:log-group:/logpulse/alerts:*"
     }
   ]
 }
