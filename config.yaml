@@ -1,4 +1,4 @@
-profile: demo                      # demo | prod   (override with env LOGPULSE_PROFILE)
+profile: demo                      # demo | prod | nasa   (override with env LOGPULSE_PROFILE)
 
 profiles:
   demo:
@@ -17,6 +17,30 @@ profiles:
     min_baseline_samples: 10
     min_events: 20
     level_shift_seconds: 900
+  nasa:                            # replaying the real NASA Jul-95 access log at speed 180: window 10 s = 30 original minutes
+    window_seconds: 10             #   (tick 1 s = 3 original min, baseline sample every 2 s = 6 min, 30 samples = 3 h of history)
+    tick_seconds: 1
+    baseline_sample_every: 2
+    baseline_max_samples: 30
+    min_baseline_samples: 10       #   warm-up = 20 s wall = 1 original hour
+    min_events: 40                 #   a per-service 30-min window needs 40 requests before its rate means anything
+    level_shift_seconds: 120
+    overrides:                     # deep-merged over the top-level sections for this profile only
+      ingestion: {format: clf}
+      generator: {autostart: false}
+      detector:
+        error_definition: "4xx+5xx"   # 5xx is only 76 of 1.9 M lines in this log, so 4xx count as errors here
+        std_floor: 0.01               # 1 pp: the log's calm windows sit at 0.0-0.5 %, so sigma is tiny and must be floored
+        warmup_ceiling: 0.05          # p99.9 of ALL-traffic 30-min windows is 3.9 %: anything above 5 % is spike, not baseline
+        resolve_ratio: 3.0            # calm = below 3x baseline (the default 1.5x is too tight for a 0.3 % baseline)
+      severity:                       # floors derived from the data - see docs/DECISIONS.md ("NASA profile thresholds")
+        medium:   {z: 5.0,  rate: 0.12, ratio: 24.0, errors: 12}   # just above p99 (10.5 %) of the noisiest coherent service (/history)
+        high:     {z: 8.0,  rate: 0.20, ratio: 40.0, errors: 16}   # ~ its p99.9 (19.5 %)
+        critical: {z: 12.0, rate: 0.30, ratio: 60.0, errors: 24}   # well beyond any routine burst
+      mapping:
+        top_n: 8                      # the 8 busiest URL prefixes = 98 % of traffic (the rest fold into "other")
+        service_prefixes: [shuttle, images, history, icons, htbin, ksc.html, cgi-bin, "/"]
+      replay: {speed: 180, max_gap_seconds: 20}
 
 detector:
   std_floor: 0.02
@@ -75,3 +99,52 @@ generator:                                    # demo log generator (scripts/gene
     - [35, error_spike]
     - [70, recover]
     - [110, normal]
+
+mapping:                           # Common Log Format -> LogEvent (used when ingestion.format is clf or auto)
+  other_service: other
+  root_service: root
+  top_n: 0
+  service_prefixes: []             # the `nasa` profile lists the top URL prefixes; see scripts/analyze_dataset.py
+
+replay:                            # scripts/replay_dataset.py and the demo API (Replay panel)
+  dataset_path: data/datasets/NASA_access_log_Jul95     # falls back to access_log_Jul95 in the same folder
+  state_file: ""                                        # heartbeat from an external replay ("" = replay.state.json next to LOG_PATH)
+  dataset_tz_minutes: -240                              # the log's own zone (-0400); naive preset times use it
+  speed: 60                                             # original seconds per wall-clock second
+  max_gap_seconds: 15                                   # cap for a scaled silent gap; keep it above the window so LOW_DATA shows
+  chunk_seconds: 0.1
+  stale_seconds: 5
+  send_to_aws: false                                    # SNS + CloudWatch OFF during a replay (ntfy/Telegram/console/JSONL/dashboard still work)
+  aws_preset: spike-history-jul24                       # the single preset allowed to opt in to AWS (the run must ask for it)
+  aws_max_sends_per_run: 20                             # hard cap on AWS deliveries in one run, even when allowed
+  presets:                                              # start/end are ET (the log's own zone); all replay at speed 180
+    spike-history-jul24:
+      description: "REAL SPIKE: /history 404 storm, 24 Jul ~03:12 ET (expect history HIGH)"
+      start: "1995-07-24 01:00"
+      end: "1995-07-24 05:30"
+      speed: 180
+      seed: 1
+    spike-icons-jul12:
+      description: "REAL SPIKE: /icons error burst ~48 %, 12 Jul ~10:26 ET (expect icons CRITICAL)"
+      start: "1995-07-12 08:00"
+      end: "1995-07-12 13:00"
+      speed: 180
+      seed: 1
+    spike-cgibin-jul03:
+      description: "REAL SPIKE: /cgi-bin failures ~45 %, 3 Jul ~10:54 ET (expect cgi-bin CRITICAL)"
+      start: "1995-07-03 08:30"
+      end: "1995-07-03 13:00"
+      speed: 180
+      seed: 1
+    volume-surge-jul13:
+      description: "REAL VOLUME-ONLY SURGE: 5-6x traffic 13 Jul 08:30-10:20 ET, error rate unchanged (expect NO alert)"
+      start: "1995-07-13 06:30"
+      end: "1995-07-13 11:00"
+      speed: 180
+      seed: 1
+    normal-jul16:
+      description: "REAL NORMAL traffic: a busy weekday, 16 Jul 08:00-14:00 ET (expect NO alert)"
+      start: "1995-07-16 08:00"
+      end: "1995-07-16 14:00"
+      speed: 180
+      seed: 1

@@ -69,6 +69,15 @@
   .sinks { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; font-size: 13px; }
   .samples { margin-top: 10px; font-size: 12px; color: var(--muted); }
   .samples code { color: var(--ink-2); word-break: break-all; }
+  .replay { display: grid; gap: 10px; }
+  .replay .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .replay select, .replay input[type=number] { font: inherit; font-size: 13px; color: var(--ink); background: var(--page);
+                                                border: 1px solid var(--axis); border-radius: 8px; padding: 6px 8px; }
+  .replay input[type=number] { width: 84px; }
+  .replay label { font-size: 12px; color: var(--ink-2); display: inline-flex; gap: 6px; align-items: center; }
+  .bar { height: 8px; border-radius: 4px; background: var(--grid); overflow: hidden; }
+  .bar > i { display: block; height: 100%; width: 0; background: var(--series); }
+  .warn { color: var(--warning); font-size: 12px; }
   @media (max-width: 560px) { .kpi .value { font-size: 24px; } .chart-wrap { height: 260px; } }
 </style>
 </head>
@@ -132,6 +141,22 @@
     <button data-scn="malformed">Malformed lines</button>
     <button id="test-alert" title="Sends a labelled fake alert through the real dispatcher to every configured sink (SNS, CloudWatch, ntfy, Telegram, JSONL)">Send test alert</button>
     <span class="note" id="demo-note"></span>
+  </section>
+
+  <section class="card replay" id="replay" hidden>
+    <h2>Dataset replay - real NASA HTTP log (Jul 1995)</h2>
+    <div class="row">
+      <select id="rp-preset" aria-label="Replay preset"></select>
+      <label>speed <input type="number" id="rp-speed" min="1" step="10" placeholder="preset"> x</label>
+      <label id="rp-aws-wrap" title="SNS/CloudWatch stay OFF during a replay unless this preset is the one allowed to use them"><input type="checkbox" id="rp-aws"> allow AWS for this run</label>
+      <button id="rp-start">Start replay</button>
+      <button id="rp-stop">Stop</button>
+    </div>
+    <div class="note" id="rp-desc">&nbsp;</div>
+    <div class="bar" aria-hidden="true"><i id="rp-bar"></i></div>
+    <div class="note" id="rp-status">not running</div>
+    <div class="note" id="rp-guard">&nbsp;</div>
+    <div class="warn" id="rp-warn" hidden></div>
   </section>
 </main>
 
@@ -342,6 +367,7 @@
       return b;
     }));
     renderAws(h.aws);
+    renderReplay(h.replay);
     const box = $('h-samples');
     box.hidden = !h.parse_error_samples.length;
     if (!box.hidden) {
@@ -372,7 +398,10 @@
           alerts.clear();
           for (const [svc, pts] of Object.entries(data.history)) series[svc] = pts.slice(-MAX_POINTS);
           data.alerts.forEach(upsertAlert);
+          presets = config.replay_presets || [];
           $('demo').hidden = !config.demo_mode;
+          document.querySelectorAll('#demo button[data-scn]').forEach((b) => { b.hidden = config.generator_active === false; });
+          setupReplay();
           markScenario(data.scenario);
           renderHealth(data.health);
           renderAlerts();
@@ -388,6 +417,53 @@
     };
   }
   setInterval(() => { if (ws && ws.readyState === 1) ws.send('{"type":"ping"}'); }, 60000);
+
+  // ---- dataset replay ------------------------------------------------------------------------
+  let presets = [];
+  function setupReplay() {
+    const box = $('replay');
+    box.hidden = !(config.demo_mode && presets.length);
+    if (box.hidden) return;
+    const sel = $('rp-preset');
+    if (sel.options.length !== presets.length) {
+      sel.replaceChildren(...presets.map((p) => { const o = el('option', null, p.name); o.value = p.name; return o; }));
+    }
+    const warn = $('rp-warn');
+    warn.hidden = config.profile === 'nasa';
+    warn.textContent = config.profile === 'nasa' ? '' : `The app is running profile "${config.profile}", not "nasa": start it with LOGPULSE_PROFILE=nasa to use the tuned window, thresholds and CLF parser.`;
+    onPresetChange();
+  }
+  function onPresetChange() {
+    const p = presets.find((x) => x.name === $('rp-preset').value);
+    $('rp-desc').textContent = p ? `${p.description}  [${p.start} -> ${p.end}, ${p.speed}x]` : '';
+    const cb = $('rp-aws');
+    cb.disabled = !p || !p.aws;                      // only the single configured preset may opt in
+    if (cb.disabled) cb.checked = false;
+    $('rp-aws-wrap').style.opacity = cb.disabled ? 0.5 : 1;
+  }
+  function renderReplay(r) {
+    if (!r) return;
+    const g = r.guard || {};
+    $('rp-bar').style.width = r.running && r.progress != null ? `${Math.round(r.progress * 100)}%` : (r.running ? '0%' : $('rp-bar').style.width);
+    $('rp-status').textContent = r.error ? `error: ${r.error}`
+      : r.running ? `▶ running "${r.preset}" at ${r.speed}x · original time ${r.orig_time || '…'} · ${r.progress != null ? Math.round(r.progress * 100) + '%' : ''} · ${(r.lines_sent || 0).toLocaleString()} lines${r.gaps_capped ? ' · ' + r.gaps_capped + ' silent gap(s) capped' : ''}`
+      : (r.lines_sent ? `■ finished "${r.preset}" · ${r.lines_sent.toLocaleString()} lines` : 'not running');
+    $('rp-guard').textContent = g.active
+      ? (g.aws_allowed ? `AWS: allowed for this run (${g.aws_sends}/${g.aws_cap} sends used, ${g.aws_suppressed} suppressed)`
+                       : `AWS: OFF during replay (${g.aws_suppressed} SNS/CloudWatch deliveries suppressed) · ntfy / Telegram / console / JSONL still deliver`)
+      : 'AWS: normal (not replaying)';
+    $('rp-start').disabled = !!r.running;
+    $('rp-stop').disabled = !r.running;
+  }
+  $('rp-preset').onchange = onPresetChange;
+  $('rp-start').onclick = async () => {
+    const sp = parseFloat($('rp-speed').value);
+    const r = await fetch('/api/demo/replay', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'start', preset: $('rp-preset').value, speed: sp > 0 ? sp : null, aws: $('rp-aws').checked }) });
+    const j = await r.json();
+    $('rp-status').textContent = r.ok ? 'starting…' : `failed: ${j.detail || r.status}`;
+  };
+  $('rp-stop').onclick = () => fetch('/api/demo/replay', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'stop' }) });
 
   // ---- demo buttons --------------------------------------------------------------------------
   const markScenario = (name) => document.querySelectorAll('#demo button[data-scn]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.scn === name)));

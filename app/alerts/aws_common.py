@@ -22,6 +22,7 @@ DEFAULT_REGION = "ap-south-1"
 
 
 def aws_session(region: str | None = None) -> boto3.Session:
+    """A boto3 session pinned to `region` (else AWS_REGION / AWS_DEFAULT_REGION / ap-south-1)."""
     return boto3.Session(region_name=region or os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION") or DEFAULT_REGION)
 
 

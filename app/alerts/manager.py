@@ -18,6 +18,7 @@ Broadcast = Callable[[str, dict], Awaitable[None]]
 
 
 class AlertManager:
+    """Turns snapshots into alerts: state machine -> persist first -> enqueue deliveries -> dashboard push."""
     def __init__(
         self,
         machine: AlertStateMachine,
@@ -26,7 +27,9 @@ class AlertManager:
         broadcast: Broadcast,
         window_seconds: float,
         on_level_shift: Callable[[str], None] | None = None,
+        channel_permit: Callable[[str], bool] | None = None,
     ) -> None:
+        self._permit = channel_permit      # e.g. ReplayGuard.permit: False -> no delivery row / send for that channel
         self.machine = machine
         self.repo = repo
         self.dispatcher = dispatcher
@@ -47,6 +50,7 @@ class AlertManager:
 
     # ---- per tick --------------------------------------------------------------------------------
     async def process(self, snapshots: list[Snapshot]) -> None:
+        """Evaluate this tick's snapshots and handle every alert transition they cause."""
         for snap in snapshots:
             t = self.machine.evaluate(snap)
             if t is not None:
@@ -74,6 +78,8 @@ class AlertManager:
             self._on_level_shift(alert.service)
         if t.notify:
             for channel in self.dispatcher.sinks:                       # 2) persist PENDING delivery rows
+                if self._permit is not None and not self._permit(channel):
+                    continue          # e.g. AWS is paused while a dataset replay runs; other channels are unaffected
                 delivery_id = self.repo.add_delivery(alert.id, t.kind, channel)
                 self.dispatcher.enqueue(Delivery(delivery_id, replace(alert), t.kind, channel))   # 3) only then send
         msg = {"created": "alert.created", "resolved": "alert.resolved"}.get(t.kind, "alert.updated")

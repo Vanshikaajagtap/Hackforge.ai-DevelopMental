@@ -35,6 +35,7 @@ SERVICES = ("payment-service", "auth-service", "orders-service", "search-service
 
 
 def synth(n: int, start: float = 1_800_000_000.0) -> list[str]:
+    """Generate `n` synthetic NDJSON lines with steady 5% errors across four services."""
     lines = []
     for i in range(n):
         ts = start + i / RATE
@@ -48,6 +49,7 @@ def synth(n: int, start: float = 1_800_000_000.0) -> list[str]:
 
 
 class ReplayClock:
+    """A clock that only moves when the replay tells it to."""
     def __init__(self) -> None:
         self.now = 0.0
 
@@ -56,6 +58,7 @@ class ReplayClock:
 
 
 def bench_core(lines: list[str], settings) -> dict:
+    """Measure parse + detect latency and throughput."""
     clock = ReplayClock()
     engine = DetectionEngine(settings, clock)
     lat: list[int] = []
@@ -85,6 +88,7 @@ def bench_core(lines: list[str], settings) -> dict:
 
 
 async def bench_pipeline(lines: list[str], settings) -> dict:
+    """Measure file -> tailer -> queue -> engine throughput and queue depth."""
     with tempfile.TemporaryDirectory() as d:
         path = os.path.join(d, "app.log")
         Path(path).write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -129,6 +133,7 @@ async def bench_pipeline(lines: list[str], settings) -> dict:
 
 
 def main() -> None:
+    """CLI entry point."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--sizes", type=int, nargs="+", default=[10_000, 50_000, 100_000])
     args = ap.parse_args()

@@ -1,0 +1,28 @@
+klothos.crl.research.digital.com - - [10/Jul/1995:16:45:50 -0400] "" 400 -
+firewall.dfw.ibm.com - - [20/Jul/1995:07:34:34 -0400] "1/history/apollo/images/" 400 -
+firewall.dfw.ibm.com - - [20/Jul/1995:07:53:24 -0400] "1/history/apollo/images/" 400 -
+128.159.122.20 - - [20/Jul/1995:15:28:50 -0400] "kÉ˚txÉ˚tGÉ˚tÕÉ˚" 400 -
+128.159.122.20 - - [24/Jul/1995:13:52:50 -0400] "kÉ˚txÉ˚tGÉ˚tÕÉ˚" 400 -
+204.120.229.63 - - [01/Jul/1995:04:29:05 -0400] "GET /history/history.html                                                 hqpao/hqpao_home.html HTTP/1.0" 200 1502
+nccse.gsfc.nasa.gov - - [01/Jul/1995:07:36:13 -0400] "GET /shuttle/missions/missions.html Shuttle Launches from Kennedy Space Center HTTP/1.0" 200 8677
+ix-nbw-nj1-22.ix.netcom.com - - [01/Jul/1995:10:42:09 -0400] "GET /finger @net.com HTTP/1.0" 404 -
+gpotterpc.llnl.gov - - [01/Jul/1995:22:26:51 -0400] "GET /htbin/wais.pl?orbit sts71 HTTP/1.0" 200 317
+dd15-062.compuserve.com - - [01/Jul/1995:00:01:12 -0400] "GET /news/sci.space.shuttle/archive/sci-space-shuttle-22-apr-1995-40.txt HTTP/1.0" 404 -
+dynip42.efn.org - - [01/Jul/1995:00:02:14 -0400] "GET /software HTTP/1.0" 302 -
+ix-or10-06.ix.netcom.com - - [01/Jul/1995:00:02:40 -0400] "GET /software/winvn HTTP/1.0" 302 -
+pipe3.nyc.pipeline.com - - [02/Jul/1995:22:24:41 -0400] "GET /shuttle/countdown/dy Ä?shuttle%20tracking HTTP/1.0" 404 -
+pipe3.nyc.pipeline.com - - [02/Jul/1995:22:25:48 -0400] "GET /shuttle/countdown/dy Ä?tracking%20station HTTP/1.0" 404 -
+p12.haifa1.actcom.co.il - - [07/Jul/1995:17:49:26 -0400] "GET /shuttle/resources/orbiters/Üb◊	 HTTP/1.0" 404 -
+202.251.172.60 - - [14/Jul/1995:04:10:23 -0400] "GET /shuttle/missions/sts-65/mission-sts-65.htmlh˛ßèä†èíûéá||(≠ HTTP/1.0" 404 -
+134.57.9.77 - - [05/Jul/1995:16:22:12 -0400] "POST /ksc.html HTTP/1.0" 501 -
+ix-tf1-18.ix.netcom.com - - [07/Jul/1995:16:21:15 -0400] "POST / HTTP/1.0" 501 -
+163.205.1.45 - - [03/Jul/1995:10:49:40 -0400] "GET /cgi-bin/geturlstats.pl HTTP/1.0" 500 0
+163.205.1.45 - - [03/Jul/1995:10:49:41 -0400] "GET /cgi-bin/geturlstats.pl HTTP/1.0" 500 0
+163.205.1.45 - - [03/Jul/1995:10:49:42 -0400] "GET /cgi-bin/geturlstats.pl HTTP/1.0" 500 0
+204.212.153.234 - - [01/Jul/1995:00:51:19 -0400] "POST /cgi-bin/newwvn-mail.pl HTTP/1.0" 200 703
+163.205.1.45 - - [03/Jul/1995:10:40:07 -0400] "POST /cgi-bin/geturlstats.pl HTTP/1.0" 200 1303
+ppp6.cpbx.net - - [01/Jul/1995:00:19:45 -0400] "HEAD /software/winvn/winvn.html HTTP/1.0" 200 0
+w3.estec.esa.nl - - [01/Jul/1995:01:37:50 -0400] "HEAD /shuttle/missions/sts-65/mission-sts-65.html HTTP/1.0" 200 0
+ntp.almaden.ibm.com - - [01/Jul/1995:02:20:29 -0400] "GET /://spacelink.msfc.nasa.gov HTTP/1.0" 404 -
+202.33.84.251 - - [01/Jul/1995:03:57:41 -0400] "GET /://spacelink.msfc.nasa.gov HTTP/1.0" 404 -
+alyssa.p

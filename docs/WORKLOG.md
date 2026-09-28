@@ -114,3 +114,33 @@ Implemented from `LogPulse_AWS_Integration_Changes.md` (the file wasn't in the r
 **Verified:** 24 new tests (moto SNS incl. SQS-delivered message inspection, CloudWatch JSON/stream/recreate, healthchecks, startup-check fail-soft cases, AWS-unreachable isolation, external_id storage, DB migration, test-alert endpoint, AWS panel, `.env` credential export). Live run with `AWS_ENABLED=false`: nothing changed (traffic spike → no alert; error spike → CRITICAL → resolved). Live run with `AWS_ENABLED=true` and **no credentials**: startup not blocked, panel shows the error, SNS/CloudWatch deliveries end FAILED after 3 attempts, console/JSONL still DELIVERED, detection kept running. An old pre-`external_id` database was migrated live.
 
 **Not verified (needs real AWS — see the README checklist):** any real SNS email, CloudWatch event, credential check against a real account, the IAM policy itself, and Logs Insights.
+
+
+---
+
+## 10. Update - real NASA HTTP log (Common Log Format), replayer, tuned `nasa` profile
+
+Dataset: `data/datasets/access_log_Jul95` (205 MB, 1,891,715 lines, 1-28 Jul 1995; also accepted as `NASA_access_log_Jul95`). Git-ignored; never committed.
+Inspected by streaming only. Full measurements, the threshold sweep and the reasoning: `docs/DATASET_ANALYSIS.md`.
+
+**Built:** CLF parser + config-driven mapping (`app/ingestion/clf.py`, `factory.py`; `ingestion.format: ndjson|clf|auto`; service from top-8 URL prefixes, level from
+status, `detector.error_definition: 5xx | 4xx+5xx | N`) - profile `overrides:` deep-merge so `nasa` changes parser/thresholds/mapping without touching `demo`/`prod` -
+replayer (`app/replay.py`, `scripts/replay_dataset.py`, dashboard panel, `GET/POST /api/demo/replay`): timestamps rewritten to now, gaps scaled by speed, seeded sub-second
+spread, silence cap, time-seeking, presets, loop - `ReplayGuard` (SNS/CloudWatch off during a replay, one opt-in preset, per-run cap, in-process or external heartbeat) -
+`scripts/analyze_dataset.py` (census, per-service/per-minute rates, spikes, threshold hints, `--simulate` runs the real detector) - 5 presets - demo mode now creates the log
+file so health is not DOWN before the first replay.
+
+**Measured:** 5xx is only 76 lines (0.004 %), 4xx+5xx is 0.58 %; `history` and `other` are intrinsically bursty (p99 30-min window ~10 %), so z is inflated (tiny baseline sigma)
+and the absolute floors carry the discrimination. First attempt (3/6/12 % floors) gave 137 alerts over the month; chosen **12 % / 20 % / 30 %**, `min_events` 40, ratio 24/40/60x,
+errors 12/16/24, z 5/8/12, `std_floor` 0.01, `warmup_ceiling` 0.05, `resolve_ratio` 3 gives 11 alerts, all real bursts.
+
+**Bugs found on the way:** an absolute-URI heuristic that turned the real path `/://spacelink...` into the root service; `str.splitlines()` splitting real lines on `\x0c`/`\x85`
+(tests use `\n` only); a global-env side effect avoided in tests.
+
+**Verified:** 324 tests pass (1 skipped) incl. CLF parser (valid, `-` bytes, zones, malformed, real oddities), mapping/error definitions, replayer timestamp rewrite / gap scaling /
+gap cap / seeking, AWS guard, API, and end-to-end on `tests/fixtures/` (a few hundred real lines) with boto3 blocked. **Live** (app on `nasa`, AWS off, 108,304 events, 0 parse errors):
+icons HIGH->CRITICAL (12 Jul 10:27), history MEDIUM->HIGH (24 Jul 03:12), cgi-bin HIGH->CRITICAL (3 Jul 10:55) + one borderline history MEDIUM (3 Jul 09:40), **no alert** on the real
+volume-only surge (13 Jul) or the normal segment (16 Jul); an external replay was recognised via its heartbeat and AWS stayed off.
+
+**Not verified:** Docker (not installed); any real AWS; interactive browser use beyond a headless render; that thresholds generalise beyond this one month of this one site;
+per-service floors (not built - moderate `shuttle` spikes are not alerted).

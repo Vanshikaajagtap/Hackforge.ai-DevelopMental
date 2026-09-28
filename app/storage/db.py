@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS checkpoints (
 
 
 class Database:
+    """SQLite connection (WAL) with a lock, the schema and in-place migrations."""
     def __init__(self, path: str) -> None:
         if path != ":memory:":
             os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
@@ -62,5 +63,6 @@ class Database:
             self.conn.execute("ALTER TABLE alert_deliveries ADD COLUMN external_id TEXT")
 
     def close(self) -> None:
+        """Close the connection."""
         with self.lock:
             self.conn.close()

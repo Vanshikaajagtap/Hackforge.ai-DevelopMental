@@ -4,6 +4,12 @@ services:
     ports:
       - "8000:8000"
     env_file: .env
+    environment:
+      # Container paths: these win over the local, relative paths in .env (which are for running without Docker).
+      LOG_PATH: /data/app.log
+      DB_PATH: /data/logpulse.db
+      ALERTS_JSONL: /data/alerts.jsonl
+      DATASET_PATH: /data/datasets/NASA_access_log_Jul95
     volumes:
       - ./data:/data
     restart: unless-stopped

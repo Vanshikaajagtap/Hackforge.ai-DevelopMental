@@ -15,6 +15,7 @@ from app.storage.repository import Repository
 
 
 class HealthMonitor:
+    """Monitors the monitor: HEALTHY / DEGRADED / DOWN plus the numbers behind it."""
     def __init__(
         self,
         settings: Settings,
@@ -33,6 +34,7 @@ class HealthMonitor:
         self._dispatcher, self._machine, self._repo = dispatcher, machine, repo
         self._skipped = skipped_sinks
         self._aws_checks: dict[str, str] = {}            # filled by the fail-soft startup check
+        self.replay_status: Callable[[], dict] | None = None   # wired by the Runtime (dataset replay panel)
         self.events_processed = 0
         self.tail_lag_ms = 0.0
         self.detection_latency_ms = 0.0
@@ -40,6 +42,7 @@ class HealthMonitor:
 
     # ---- recorded by the pipeline ----------------------------------------------------------------
     def record_event(self, event_ts: float) -> None:
+        """Note a processed event (tail lag and throughput)."""
         now = self._clock()
         self.events_processed += 1
         self.tail_lag_ms = max(0.0, (now - event_ts) * 1000)   # how stale the event was when we got to it
@@ -54,6 +57,7 @@ class HealthMonitor:
         self._aws_checks[name] = status
 
     def aws_report(self) -> dict:
+        """State of the AWS startup check, for the dashboard."""
         s = self._s
         sinks = self._dispatcher.sinks
         if not s.aws_enabled:
@@ -67,9 +71,11 @@ class HealthMonitor:
 
     def record_tick(self, seconds: float) -> None:
         # exponential moving average so one slow tick doesn't dominate
+        """Track detection latency per tick as a moving average."""
         self.detection_latency_ms = 0.8 * self.detection_latency_ms + 0.2 * seconds * 1000
 
     def events_per_second(self) -> float:
+        """Recent processing throughput."""
         span = self._s.health.events_per_second_span_seconds
         now = self._clock()
         while self._buckets and self._buckets[0][0] < now - span:
@@ -78,15 +84,18 @@ class HealthMonitor:
 
     # ---- report ----------------------------------------------------------------------------------
     def report(self) -> dict:
+        """The full health payload for /api/system/status and `health.update`."""
         h, st = self._s.health, self._stats
         now = self._clock()
+        self._repo.ping()          # active check: DB trouble is noticed even if no write happened to fail this tick
         depth, cap = self._queue.qsize(), self._queue.maxsize
         file_status = "ok" if self._tailer.file_ok else "missing"
 
         sinks: dict[str, dict] = {}
         for name, s in self._dispatcher.stats.items():
             status = "idle" if s.last_ok is None else ("ok" if s.last_ok else "failing")
-            sinks[name] = {"status": status, "success": s.success, "failure": s.failure, "last_error": s.last_error}
+            sinks[name] = {"status": status, "success": s.success, "failure": s.failure, "last_error": s.last_error,
+                           "last_ok_at": s.last_ok_at}
         for name, why in self._skipped.items():
             sinks[name] = {"status": "disabled", "success": 0, "failure": 0, "last_error": why}
 
@@ -133,6 +142,7 @@ class HealthMonitor:
             "active_alerts": len(self._machine.open),
             "sinks": sinks,
             "aws": aws,
+            "replay": self.replay_status() if self.replay_status else {"running": False},
             "sink_success": sum(s["success"] for s in sinks.values()),
             "sink_failure": sum(s["failure"] for s in sinks.values()),
             "delivery_backlog": self._dispatcher.backlog,

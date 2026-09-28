@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
 import time
 from dataclasses import asdict
 from typing import Callable
@@ -27,8 +28,10 @@ from app.detection.state import AlertStateMachine
 from app.generator import LogGenerator, ScenarioController
 from app.health import HealthMonitor
 from app.ingestion.models import LogEvent
-from app.ingestion.parser import IngestStats, ParseError, parse_line
+from app.ingestion.factory import build_parser
+from app.ingestion.parser import IngestStats, ParseError
 from app.ingestion.tailer import Checkpoint, Tailer
+from app.replay import ReplayController, ReplayGuard
 from app.storage.db import Database
 from app.storage.repository import Repository
 
@@ -39,6 +42,7 @@ FRONTEND = ROOT / "frontend"
 
 
 class Runtime:
+    """Owns every component and background task (tailer, parser, detector, alerts, storage, API state)."""
     def __init__(
         self,
         settings: Settings,
@@ -52,6 +56,7 @@ class Runtime:
         self.machine = AlertStateMachine(s.detector, s.profile)
         self.engine = DetectionEngine(s, clock, frozen_fn=self.machine.is_open)
         self.stats = IngestStats()
+        self.parse = build_parser(settings)          # ndjson | clf | auto, plus the error definition (see config)
         self.queue: asyncio.Queue[LogEvent] = asyncio.Queue(maxsize=s.ingestion.queue_max)
         self.latest: dict[str, Snapshot] = {}
         self.scenario = ScenarioController(s.generator, clock)
@@ -68,11 +73,17 @@ class Runtime:
         self.dispatcher = Dispatcher(
             sinks, self.repo, s.alerts.retry_attempts, s.alerts.retry_backoff_seconds, s.alerts.sink_timeout_seconds,
             on_update=self._publish_update, clock=clock)
+        # SNS / CloudWatch stay OFF while a dataset replay runs (opt-in for one preset, capped per run): see ReplayGuard
+        self.guard = ReplayGuard(s.replay, clock)
         self.manager = AlertManager(
             self.machine, self.repo, self.dispatcher, self.hub.broadcast, s.profile.window_seconds,
-            on_level_shift=lambda svc: self.engine.detector(svc).reset_baseline())
+            on_level_shift=lambda svc: self.engine.detector(svc).reset_baseline(),
+            channel_permit=self.guard.permit)
+        self.replay = ReplayController(s, self.guard, on_start=self._replay_started, on_finish=self._replay_finished,
+                                       clock=clock)
         self.health = HealthMonitor(s, clock, self.stats, self.queue, self.engine, self.tailer,
                                     self.dispatcher, self.machine, self.repo, skipped)
+        self.health.replay_status = self.replay.status
         self._tasks: list[asyncio.Task] = []
         self._gen_stop = asyncio.Event()
         self._restore()
@@ -91,11 +102,30 @@ class Runtime:
         log.info("restored: %d services, %d open alerts, checkpoint=%s",
                  len(self.engine.services), len(self.machine.open), self.tailer.resume)
 
+    # ---- dataset replay hooks ----------------------------------------------------------------------
+    def reset_detection(self) -> None:
+        """Fresh, reproducible run: forget windows/baselines/open alerts (open ones are closed silently, no notification)."""
+        for alert in self.machine.reset():
+            alert.status, alert.resolved_at = "RESOLVED", self.clock()
+            alert.reason += " | closed silently: detector reset for a new replay run"
+            self.repo.upsert_alert(alert)
+        self.engine.services.clear()
+        self.latest.clear()
+
+    def _replay_started(self) -> None:
+        self.scenario.paused = True                   # the replay owns the log file: pause the synthetic generator
+        self.reset_detection()
+
+    def _replay_finished(self) -> None:
+        self.scenario.paused = False
+
     # ---- views -----------------------------------------------------------------------------------
     def current_metrics(self) -> list[dict]:
+        """Latest snapshot per service, as dicts."""
         return [asdict(x) for x in self.latest.values()]
 
     def hello(self) -> dict:
+        """The full state a dashboard receives when it connects."""
         s = self.settings
         since = self.clock() - s.storage.hello_history_minutes * 60
         services = sorted(set(self.latest) | set(self.repo.services()))
@@ -106,6 +136,11 @@ class Runtime:
                 "tick_seconds": s.profile.tick_seconds,
                 "min_events": s.profile.min_events,
                 "demo_mode": s.demo_mode,
+                "generator_active": s.demo_mode and s.generator.autostart,
+                "ingestion_format": s.ingestion.format,
+                "error_definition": s.detector.error_definition,
+                "replay_presets": self.replay.presets() if s.demo_mode else [],
+                "dataset_tz_minutes": s.replay.dataset_tz_minutes,
             },
             "scenario": self.scenario.name,
             "services": services,
@@ -116,6 +151,7 @@ class Runtime:
         }
 
     async def send_test_alert(self) -> dict:
+        """Send a labelled fake alert through the real pipeline (demo mode)."""
         alert = await self.manager.send_test(self.clock())
         return {"queued": True, "alert_id": alert.id, "sinks": list(self.dispatcher.sinks)}
 
@@ -124,14 +160,14 @@ class Runtime:
 
     # ---- pipeline stages -------------------------------------------------------------------------
     async def ingest_line(self, line: str) -> None:
+        """Parse one raw line and queue the event, dropping the oldest under backpressure."""
         self.stats.lines_read += 1
         try:
-            ev = parse_line(line)
+            ev = self.parse(line)
         except ParseError as e:
             self.stats.record_error(line, str(e))     # counted, sampled, skipped - never fatal
             return
         self.stats.events_parsed += 1
-        self.stats.last_event_ts = ev.ts
         self.stats.last_event_seen_at = self.clock()
         if self.queue.full():                         # backpressure: drop the oldest, count it
             with contextlib.suppress(asyncio.QueueEmpty):
@@ -166,6 +202,7 @@ class Runtime:
         while True:
             await asyncio.sleep(s.profile.tick_seconds)
             try:
+                self.guard.poll_file()                # an external scripts/replay_dataset.py announces itself here
                 await self._tick_once()
                 if self.clock() - last_prune >= s.storage.prune_every_seconds:
                     last_prune = self.clock()
@@ -174,6 +211,10 @@ class Runtime:
                 log.exception("tick failed")
 
     def save_checkpoint(self) -> None:
+        """Persist the tailer position so a restart resumes instead of replaying."""
+        # (inode, offset): the inode detects a replaced file (then we must not seek); the offset is the first UNPARSED
+        # byte, so a line that was only half written at shutdown is re-read whole. Events still in the in-memory
+        # queue at a hard crash are not covered - a few seconds of loss at most, documented in the README.
         if self.tailer.inode is not None:
             self.repo.save_checkpoint(self.settings.log_path, self.tailer.inode, self.tailer.offset, self.clock())
 
@@ -184,6 +225,11 @@ class Runtime:
 
     # ---- lifecycle -------------------------------------------------------------------------------
     def start(self) -> None:
+        """Launch the pipeline tasks."""
+        if self.settings.demo_mode:                   # a profile without the synthetic generator (nasa) has nothing creating the
+            path = self.settings.log_path             # log until a replay starts: make it exist so health is not DOWN meanwhile
+            os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+            open(path, "ab").close()
         coros = [
             self.tailer.run(self.ingest_line), self._consume(), self._tick_loop(),
             self.dispatcher.run(), self._checkpoint_loop(),
@@ -191,12 +237,15 @@ class Runtime:
         if any(n in self.dispatcher.sinks for n in ("sns", "cloudwatch")):
             # fail-soft: runs in the background, reports to the health panel, can never block or crash startup
             coros.append(aws_startup_check(self.dispatcher.sinks, self.health.set_aws))
-        if self.settings.demo_mode:
+        if self.settings.demo_mode and self.settings.generator.autostart:
             gen = LogGenerator(self.settings.generator, self.scenario)
             coros.append(gen.run(self.settings.log_path, stop=self._gen_stop))
         self._tasks = [asyncio.create_task(c) for c in coros]
 
     async def stop(self) -> None:
+        """Cancel the tasks, write the final checkpoint and close the database."""
+        with contextlib.suppress(Exception):
+            await self.replay.stop()
         self._gen_stop.set()
         for t in self._tasks:
             t.cancel()
@@ -208,6 +257,7 @@ class Runtime:
 
 
 def create_app(settings: Settings | None = None, sinks: dict[str, AlertSink] | None = None) -> FastAPI:
+    """Build the FastAPI app; its lifespan starts and stops the Runtime."""
     settings = settings or load_settings()
 
     @contextlib.asynccontextmanager

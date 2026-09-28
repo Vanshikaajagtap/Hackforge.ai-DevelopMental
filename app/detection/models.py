@@ -1,3 +1,4 @@
+"""Data contracts: Snapshot (one service, one tick) and Alert (an incident with its evidence)."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -6,6 +7,7 @@ from typing import Literal
 
 @dataclass
 class Snapshot:          # emitted every tick per service
+    """One tick of one service: counts, rate, baseline stats, z, ratio, state and severity."""
     ts: float
     service: str
     total: int
@@ -21,6 +23,7 @@ class Snapshot:          # emitted every tick per service
 
 @dataclass
 class Alert:
+    """An incident with its evidence; persisted, delivered and shown on the dashboard."""
     id: str
     dedup_key: str
     service: str

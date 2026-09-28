@@ -1,3 +1,4 @@
+"""ntfy.sh push sink (free, no signup; the topic acts as the password)."""
 from __future__ import annotations
 
 import httpx
@@ -19,6 +20,7 @@ class NtfySink:
         self._timeout = timeout
 
     async def send(self, alert: Alert, event: str) -> None:
+        """POST the alert to the topic with title, priority and tags."""
         if event == "resolved":
             prio, tags, label = "default", "white_check_mark", "RESOLVED"
         else:

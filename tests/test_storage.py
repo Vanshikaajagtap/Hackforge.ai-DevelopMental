@@ -10,7 +10,9 @@ from conftest import sample_alert, snap
 
 @pytest.fixture
 def repo():
-    return Repository(Database(":memory:"))
+    r = Repository(Database(":memory:"))
+    yield r
+    r.db.close()
 
 
 def test_schema_matches_the_prd_tables(repo):

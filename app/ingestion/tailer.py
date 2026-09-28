@@ -12,11 +12,13 @@ LineSink = Callable[[str], Awaitable[None]]
 
 
 class Checkpoint(NamedTuple):
+    """Where to resume: the file's identity (inode) and a byte offset."""
     inode: int
     offset: int
 
 
 class Tailer:
+    """Poll-tail of a growing file: partial-line buffering, checkpoint resume, rotation and truncation handling."""
     def __init__(
         self,
         path: str,
@@ -41,6 +43,7 @@ class Tailer:
     # ---- state exposed for checkpoints / health -------------------------------------------------
     @property
     def inode(self) -> int | None:
+        """Inode of the open file, or None when it is not open."""
         return self._inode if self._fh is not None else None
 
     @property
@@ -50,6 +53,7 @@ class Tailer:
 
     @property
     def file_ok(self) -> bool:
+        """Whether the log file currently exists."""
         return os.path.exists(self.path)
 
     # ---- opening ---------------------------------------------------------------------------------
@@ -112,6 +116,7 @@ class Tailer:
         return lines
 
     async def run(self, sink: LineSink) -> None:
+        """Feed every new line to `sink` until cancelled."""
         try:
             while True:
                 try:
@@ -128,6 +133,7 @@ class Tailer:
             self.close()
 
     def close(self) -> None:
+        """Close the file handle."""
         if self._fh is not None:
             self._fh.close()
             self._fh = None

@@ -1,4 +1,6 @@
 -r requirements.txt
 pytest
 pytest-asyncio
+pytest-cov
 moto[sns,logs]
+ruff

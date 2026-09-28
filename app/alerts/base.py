@@ -11,6 +11,7 @@ Event = Literal["created", "escalated", "resolved"]
 
 
 class AlertSink(Protocol):
+    """The contract every delivery channel implements; detection never imports concrete sinks."""
     name: str
 
     async def send(self, alert: Alert, event: str) -> str | None:
@@ -29,6 +30,7 @@ def _utc(ts: float) -> str:
 
 
 def headline(alert: Alert, event: str) -> str:
+    """First line of an alert message: severity, service and error rate (or the recovery notice)."""
     if event == "resolved":
         return f"[RESOLVED] {alert.service} error rate recovered (peak {alert.peak_severity} {_pct(alert.current_rate)})"
     suffix = " (escalated)" if event == "escalated" else ""

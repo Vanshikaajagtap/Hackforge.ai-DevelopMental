@@ -54,7 +54,7 @@ async def test_backpressure_drops_the_oldest_and_degrades_health(make_runtime, c
 async def test_queue_at_80_percent_is_degraded(make_runtime, clock):
     rt = make_runtime(queue_max=10)
     open(rt.settings.log_path, "a").close()                                   # the file exists, so we're not DOWN
-    for i in range(8):
+    for _ in range(8):
         await rt.ingest_line(ndjson(clock.now, False))
     h = rt.health.report()
     assert h["status"] == "DEGRADED" and "queue at 8/10" in h["reasons"][0]
@@ -104,3 +104,26 @@ async def test_a_failed_aws_check_is_shown_but_fail_soft(make_runtime, clock):
     assert h["aws"]["aws_identity"].startswith("error") and h["aws"]["cloudwatch"] == "not configured"
     assert h["status"] == "HEALTHY"                                   # does not take the monitor down or degrade it
     assert any("aws check failed" in r for r in h["reasons"])         # ...but it is visible
+
+
+async def test_the_health_report_itself_notices_a_dead_database(make_runtime, clock):
+    rt = make_runtime()
+    await pump(rt, clock, 2, 5, 0)
+    assert rt.health.report()["db_status"] == "ok"
+    rt.repo.db.close()                                   # no write has failed yet - the report must find out on its own
+    h = rt.health.report()
+    assert h["status"] == "DOWN" and h["db_status"] == "error"
+
+
+async def test_sink_health_carries_the_last_successful_delivery_time(make_runtime, clock):
+    from app.alerts.dispatcher import Delivery
+    rt = make_runtime(sinks={"fake": RecordingSink("fake")})
+    assert rt.health.report()["sinks"]["fake"]["last_ok_at"] is None
+    task = __import__("asyncio").create_task(rt.dispatcher.run())
+    from conftest import sample_alert
+    alert = sample_alert()
+    rt.repo.upsert_alert(alert)
+    rt.dispatcher.enqueue(Delivery(rt.repo.add_delivery(alert.id, "created", "fake"), alert, "created", "fake"))
+    await rt.dispatcher.drain()
+    task.cancel()
+    assert rt.health.report()["sinks"]["fake"]["last_ok_at"] == clock.now

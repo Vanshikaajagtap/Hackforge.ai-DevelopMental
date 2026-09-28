@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 import boto3
 import pytest
-from botocore.exceptions import EndpointConnectionError
+from botocore.exceptions import ClientError, EndpointConnectionError
 from moto import mock_aws
 
 from app.alerts import build_sinks
@@ -29,7 +29,9 @@ GROUP = "/logpulse/alerts"
 
 @pytest.fixture
 def repo():
-    return Repository(Database(":memory:"))
+    r = Repository(Database(":memory:"))
+    yield r
+    r.db.close()
 
 
 def make_topic() -> str:
@@ -69,14 +71,14 @@ def test_sns_subject_is_ascii_single_line_and_short():
 
 
 async def test_sns_to_a_missing_topic_raises_so_the_dispatcher_can_retry():
-    with mock_aws(), pytest.raises(Exception):
+    with mock_aws(), pytest.raises(ClientError):
         await SnsSink(f"arn:aws:sns:{REGION}:123456789012:does-not-exist", REGION).send(sample_alert(), "created")
 
 
 async def test_sns_healthcheck():
     with mock_aws():
         await SnsSink(make_topic(), REGION).healthcheck()
-        with pytest.raises(Exception):
+        with pytest.raises(ClientError):
             await SnsSink(f"arn:aws:sns:{REGION}:123456789012:nope", REGION).healthcheck()
 
 
@@ -104,7 +106,7 @@ async def test_cloudwatch_custom_stream_prefix():
 
 
 async def test_cloudwatch_with_a_missing_log_group_raises():
-    with mock_aws(), pytest.raises(Exception):
+    with mock_aws(), pytest.raises(ClientError):
         await CloudWatchSink("/does/not/exist", region=REGION).send(sample_alert(), "created")
 
 
@@ -124,7 +126,7 @@ async def test_cloudwatch_healthcheck_needs_only_the_write_permissions():
     with mock_aws():
         boto3.client("logs", region_name=REGION).create_log_group(logGroupName=GROUP)
         await CloudWatchSink(GROUP, region=REGION).healthcheck()
-        with pytest.raises(Exception):
+        with pytest.raises(ClientError):
             await CloudWatchSink("/nope", region=REGION).healthcheck()
 
 

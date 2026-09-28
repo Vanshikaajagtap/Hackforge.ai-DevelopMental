@@ -39,14 +39,17 @@ class ScenarioController:
         self._clock = clock
         self.name = "normal"
         self.started_at = clock()
+        self.paused = False              # True while a dataset replay owns the log file
 
     def set(self, name: str) -> None:
+        """Select a scenario ('recover' is simply normal traffic again)."""
         if name not in SCENARIOS:
             raise ValueError(f"unknown scenario {name!r}; expected one of {SCENARIOS}")
         self.name = name
         self.started_at = self._clock()
 
     def elapsed(self) -> float:
+        """Seconds since the current scenario started."""
         return self._clock() - self.started_at
 
     def effective(self) -> tuple[str, float]:
@@ -63,10 +66,12 @@ class ScenarioController:
 
     @property
     def timeline_end(self) -> float:
+        """When the scripted `mixed` timeline ends, in seconds."""
         return float(self._cfg.mixed_timeline[-1][0])
 
 
 class LogGenerator:
+    """Produces reproducible NDJSON traffic for the demo scenarios."""
     def __init__(self, cfg: GeneratorCfg, controller: ScenarioController, seed: int | None = None,
                  clock: Callable[[], float] = time.time) -> None:
         self.cfg = cfg
@@ -131,11 +136,15 @@ class LogGenerator:
         return lines
 
     async def run(self, path: str, step: float = 0.1, stop: asyncio.Event | None = None) -> None:
+        """Append generated lines to the log file until stopped."""
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
         last = self._clock()
         while stop is None or not stop.is_set():
             await asyncio.sleep(step)
             now = self._clock()
+            if self.controller.paused:
+                last = now
+                continue
             lines = self.batch(now, now - last)
             last = now
             if lines:

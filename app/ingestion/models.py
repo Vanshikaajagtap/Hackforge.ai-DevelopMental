@@ -1,3 +1,4 @@
+"""LogEvent: the normalised record every parser produces."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -5,6 +6,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class LogEvent:
+    """One normalised log record."""
     ts: float            # epoch seconds (parsed from timestamp)
     service: str
     level: str           # upper-cased

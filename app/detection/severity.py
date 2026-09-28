@@ -1,3 +1,4 @@
+"""Severity policy: which row of the gate table an observation satisfies."""
 from __future__ import annotations
 
 from app.config import SeverityCfg, SeverityRow
@@ -6,6 +7,7 @@ RANK = {"NONE": 0, "MEDIUM": 1, "HIGH": 2, "CRITICAL": 3}
 
 
 def rank(severity: str) -> int:
+    """Numeric order of a severity name (NONE < MEDIUM < HIGH < CRITICAL)."""
     return RANK[severity]
 
 

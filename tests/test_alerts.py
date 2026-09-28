@@ -1,5 +1,6 @@
 import asyncio
 import json
+from pathlib import Path
 
 import httpx
 import pytest
@@ -23,7 +24,9 @@ from conftest import sample_alert, snap
 
 @pytest.fixture
 def repo():
-    return Repository(Database(":memory:"))
+    r = Repository(Database(":memory:"))
+    yield r
+    r.db.close()
 
 
 # ---- rendering + payload ---------------------------------------------------------------------------
@@ -124,7 +127,7 @@ def test_build_sinks_skips_unconfigured_and_placeholder_sinks(tmp_path):
 
 def test_build_sinks_enables_configured_free_sinks_and_gates_aws_behind_the_flag(tmp_path):
     cfg = tmp_path / "c.yaml"
-    text = open("config.yaml", encoding="utf-8").read().replace(
+    text = Path("config.yaml").read_text(encoding="utf-8").replace(
         "sinks: [console, jsonl, sns, cloudwatch, ntfy, telegram]",
         "sinks: [console, jsonl, sns, cloudwatch, ntfy, telegram, webhook]")
     assert "webhook" in text

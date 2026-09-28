@@ -20,6 +20,7 @@ Kind = Literal["created", "escalated", "updated", "resolved"]
 
 @dataclass
 class Transition:
+    """What the state machine decided this tick, and whether it warrants a notification."""
     kind: Kind
     alert: Alert
     notify: bool
@@ -28,6 +29,7 @@ class Transition:
 
 
 def dedup_key(service: str) -> str:
+    """The key identifying the single open alert a service can have."""
     return f"{service}:error_rate"
 
 
@@ -51,6 +53,7 @@ def build_evidence(snap: Snapshot, window_seconds: float) -> dict:
 
 
 class AlertStateMachine:
+    """Per-service alert lifecycle: confirm, escalate, hysteresis, dedup and level shift."""
     def __init__(
         self,
         detector_cfg: DetectorCfg,
@@ -64,20 +67,33 @@ class AlertStateMachine:
         self._pending: dict[str, int] = {}
         self._calm: dict[str, int] = {}
 
+    def reset(self) -> list[Alert]:
+        """Forget all in-memory state (a fresh, reproducible run). Returns the alerts that were open; the caller decides
+        what to do with them (the runtime resolves them silently)."""
+        was_open = list(self.open.values())
+        self.open.clear()
+        self._pending.clear()
+        self._calm.clear()
+        return was_open
+
     # ---- queries / restore -----------------------------------------------------------------------
     def is_open(self, service: str) -> bool:
+        """Whether `service` currently has an open alert."""
         return dedup_key(service) in self.open
 
     def open_alerts(self) -> list[Alert]:
+        """The currently open alerts."""
         return list(self.open.values())
 
     def restore(self, alerts: list[Alert]) -> None:
+        """Reload open alerts so a restart does not create a duplicate 'created'."""
         for a in alerts:
             if a.status == "OPEN":
                 self.open[a.dedup_key] = a
 
     # ---- evaluation ------------------------------------------------------------------------------
     def evaluate(self, snap: Snapshot) -> Transition | None:
+        """Advance the machine with one snapshot; returns a Transition or None."""
         key = dedup_key(snap.service)
         alert = self.open.get(key)
         return self._evaluate_closed(key, snap) if alert is None else self._evaluate_open(key, alert, snap)

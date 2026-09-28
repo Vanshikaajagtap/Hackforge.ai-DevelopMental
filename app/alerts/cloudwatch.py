@@ -1,3 +1,4 @@
+"""CloudWatch Logs sink: one JSON event per alert in a per-UTC-day log stream (the evidence trail)."""
 from __future__ import annotations
 
 import asyncio
@@ -39,6 +40,7 @@ class CloudWatchSink:
         self._ready.add(stream)
 
     async def send(self, alert: Alert, event: str) -> str:
+        """Write the alert as a JSON log event; returns `group:stream` as proof of delivery."""
         def _put() -> str:
             stream = self._stream_name()
             event_row = [{"timestamp": int(time.time() * 1000), "message": json.dumps(alert_payload(alert, event))}]
